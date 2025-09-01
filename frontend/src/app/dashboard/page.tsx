@@ -37,6 +37,8 @@ type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
 
 
 import FilterBarPro from "@/components/FilterBarPro";
+import WidgetCard from "@/components/WidgetCard";
+import TimeRangeChips, { type RangeKey } from "@/components/TimeRangeChips";
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [rows, setRows] = useState<Row[]>([]);
@@ -207,44 +209,70 @@ export default function DashboardPage() {
 
       {/* REALTIME */}
       {tab === "realtime" && (
-        <>
-          <EnhancedKPIs total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
+  <>
+    {/* KPIs ejecutivos */}
+    <EnhancedKPIs total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
 
-          {/* Filtros + Export */}
-          <FilterBarPro
-  q={q}
-  onQ={setQ}
-  onlyActive={onlyActive}
-  onOnlyActive={setOnlyActive}
-  minScore={minScore}
-  onMinScore={setMinScore}
-  sort={sort}
-  onSort={setSort}
-  onExport={exportCsv}
-/>
+    {/* Filtros + Export */}
+    <FilterBarPro
+      q={q}
+      onQ={setQ}
+      onlyActive={onlyActive}
+      onOnlyActive={setOnlyActive}
+      minScore={minScore}
+      onMinScore={setMinScore}
+      sort={sort}
+      onSort={setSort}
+      onExport={exportCsv}
+    />
 
-          {/* Calidad + Alertas */}
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <div className="lg:col-span-2">{quality ? <QualityPanel {...quality} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando calidad…</div>}</div>
-            <LiveAlerts />
-          </section>
+    {/* Grid analítico (12 columnas) */}
+    <div className="grid grid-cols-12 gap-4 mt-4">
+      {/* Pulso global */}
+      <div className="col-span-12 lg:col-span-7">
+        <WidgetCard title="Tendencia (pulso global)" right={<TimeRangeChips value={range} onChange={setRange as any} />}>
+          <div className="h-64">
+            <TrendChart series={series} />
+          </div>
+        </WidgetCard>
+      </div>
 
-          {/* Global (no filtrado) */}
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-            <div className="lg:col-span-2"><TrendChart series={series} /></div>
+      {/* Distribución */}
+      <div className="col-span-12 lg:col-span-5">
+        <WidgetCard title="Distribución de scores">
+          <div className="h-64">
             <HistogramScores scores={scores} />
-          </section>
+          </div>
+        </WidgetCard>
+      </div>
 
-          {/* Filtrado */}
-          <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <div className="lg:col-span-2 space-y-4">
-              <MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} />
-              <RiskMap events={eventsFiltered} />
-            </div>
-            <ScoreTable rows={filteredRows} seriesByUser={seriesByUserFiltered} lastRiskByUser={lastRiskByUser.current} />
-          </section>
-        </>
-      )}
+      {/* Multiusuario (filtrado) */}
+      <div className="col-span-12 lg:col-span-7">
+        <WidgetCard title="Series por conductor (filtrado)">
+          <div className="h-72">
+            <MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} />
+          </div>
+        </WidgetCard>
+      </div>
+
+      {/* Mapa (filtrado) */}
+      <div className="col-span-12 lg:col-span-5">
+        <WidgetCard title="Eventos de riesgo (filtrados)">
+          <div className="h-72">
+            <RiskMap events={eventsFiltered} />
+          </div>
+        </WidgetCard>
+      </div>
+
+      {/* Tabla operativa (filtrada) */}
+      <div className="col-span-12">
+        <WidgetCard title="Detalle operativo (filtrado)" subtitle="Abrí un conductor para ver su ficha">
+          <ScoreTable rows={filteredRows} seriesByUser={seriesByUserFiltered} lastRiskByUser={lastRiskByUser.current} />
+        </WidgetCard>
+      </div>
+    </div>
+  </>
+)}
 
       {/* PORTFOLIO */}
       {tab === "portfolio" && (

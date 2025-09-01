@@ -22,6 +22,8 @@ import { computePercentiles, eventsHeatmap } from "./analytics2";
 import { qualityMetrics } from "./quality";
 import { pushAlert, getRecentAlerts, ackAlert } from "./alerts";
 
+import { liftByDecile, expectedLoss, claimsAging } from "./loss";
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: config.corsOrigin } });
@@ -35,38 +37,29 @@ app.use(morgan("dev"));
 app.get("/health", (_req, res) => res.status(StatusCodes.OK).json({ ok: true, ts: Date.now() }));
 app.get("/scores", (_req, res) => res.json({ items: getTop(500).map(toLean) }));
 
-/** Portfolio Metrics */
-app.get("/metrics", (_req, res) => {
-  const scores = getTop(500);
-  res.json({ metrics: computePortfolioMetrics(scores) });
-});
+/** Portfolio Metrics + Analytics básicas */
+app.get("/metrics", (_req, res) => res.json({ metrics: computePortfolioMetrics(getTop(500)) }));
+app.get("/analytics", (_req, res) => res.json({ analytics: portfolioAnalytics(getTop(500)) }));
 
-/** Analytics */
-app.get("/analytics", (_req, res) => {
-  const scores = getTop(500);
-  res.json({ analytics: portfolioAnalytics(scores) });
-});
-
-/** Portfolio - Percentiles (sobre snapshot actual) */
+/** Percentiles snapshot */
 app.get("/portfolio/percentiles", (_req, res) => {
   const values = getTop(1000).map((s) => s.score);
-  const pct = computePercentiles(values);
-  res.json({ percentiles: pct });
+  res.json({ percentiles: computePercentiles(values) });
 });
 
-/** Events Heatmap (7x24) */
+/** Heatmap de eventos */
 app.get("/events/heatmap", (req, res) => {
   const days = Math.max(1, Math.min(30, Number(req.query.days ?? 7)));
   res.json({ matrix: eventsHeatmap(days) });
 });
 
-/** Quality metrics (ventana reciente) */
+/** Quality window */
 app.get("/quality/metrics", (req, res) => {
   const minutes = Math.max(1, Math.min(360, Number(req.query.minutes ?? 60)));
   res.json({ quality: qualityMetrics(minutes) });
 });
 
-/** Claims */
+/** Claims (CRUD mínimo) */
 const claimSchema = z.object({
   userId: z.string(),
   ts: z.number().optional(),
@@ -92,7 +85,7 @@ app.post("/claims", (req, res) => {
   return res.status(StatusCodes.CREATED).json({ item: saved });
 });
 
-/** Sim Config (runtime tuning) */
+/** Sim config */
 const simPatchSchema = z.object({
   targetScore: z.number().min(0).max(100).optional(),
   kPull: z.number().min(0).max(1).optional(),
@@ -107,44 +100,48 @@ const simPatchSchema = z.object({
   }).partial().optional(),
 }).partial();
 
-app.get("/sim-config", (_req, res) => {
-  res.json({ config: getSimConfig() });
-});
-
+app.get("/sim-config", (_req, res) => res.json({ config: getSimConfig() }));
 app.patch("/sim-config", (req, res) => {
   const parsed = simPatchSchema.safeParse(req.body);
   if (!parsed.success) return res.status(StatusCodes.BAD_REQUEST).json({ error: parsed.error.flatten() });
-  const cfg = updateSimConfig(parsed.data);
-  return res.json({ config: cfg });
+  res.json({ config: updateSimConfig(parsed.data) });
 });
-
-app.post("/sim-config/reset", (_req, res) => {
-  const cfg = resetSimConfig();
-  return res.json({ config: cfg });
-});
+app.post("/sim-config/reset", (_req, res) => res.json({ config: resetSimConfig() }));
 
 /** Alerts (sev >= 4) */
 app.get("/alerts/recent", (req, res) => {
   const minutes = Math.max(1, Math.min(120, Number(req.query.minutes ?? 15)));
   res.json({ items: getRecentAlerts(minutes) });
 });
-
 app.post("/alerts/ack", (req, res) => {
   const id = String(req.body?.id ?? "");
   if (!id) return res.status(StatusCodes.BAD_REQUEST).json({ ok: false, error: "missing id" });
-  const ok = ackAlert(id);
-  return res.json({ ok });
+  res.json({ ok: ackAlert(id) });
 });
 
-/** Socket.IO bootstrap + streams */
+/** === Sprint 2: endpoints nuevos === */
+app.get("/portfolio/lift", (req, res) => {
+  const days = Math.max(7, Math.min(365, Number(req.query.days ?? 90)));
+  const bins = Math.max(3, Math.min(20, Number(req.query.bins ?? 10)));
+  res.json({ items: liftByDecile(days, bins) });
+});
+
+app.get("/loss/expected", (req, res) => {
+  const days = Math.max(7, Math.min(365, Number(req.query.days ?? 30)));
+  const by = (String(req.query.by || "bucket") === "region") ? "region" : "bucket";
+  res.json({ items: expectedLoss(by as any, days) });
+});
+
+app.get("/claims/aging", (req, res) => {
+  const days = Math.max(7, Math.min(365, Number(req.query.days ?? 90)));
+  res.json({ items: claimsAging(days) });
+});
+
+/** Socket bridge */
 io.on("connection", (socket) => {
   socket.emit("bootstrap", { items: getTop(200).map(toLean) });
 });
-
-// bridge bus → io (+ almacenar eventos y alertas)
-bus.on("score", (lean: LeanState) => {
-  io.emit("score:update", { type: "score:update", state: lean });
-});
+bus.on("score", (lean: LeanState) => io.emit("score:update", { type: "score:update", state: lean }));
 bus.on("risk", (evt: { userId: string; ts: number; type: "overSpeed" | "hardBrake" | "hardAccel"; lat: number; lng: number; severity: number }) => {
   incEvents(evt.userId);
   addRiskEvent(evt);

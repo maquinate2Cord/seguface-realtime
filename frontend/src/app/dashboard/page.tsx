@@ -14,11 +14,11 @@ import PercentilesBands from "@/components/PercentilesBands";
 import EventsHeatmap from "@/components/EventsHeatmap";
 import QualityPanel from "@/components/QualityPanel";
 import LiveAlerts from "@/components/LiveAlerts";
+import LiftDecilesChart from "@/components/LiftDecilesChart";
+import ExpectedLossPanel from "@/components/ExpectedLossPanel";
+import ClaimsAgingPanel from "@/components/ClaimsAgingPanel";
 
-const SimConfigPanel = dynamic(() => import("@/components/SimConfigPanel"), {
-  ssr: false,
-  loading: () => <div className="text-sm text-slate-500">Cargando SimConfig…</div>,
-});
+const SimConfigPanel = dynamic(() => import("@/components/SimConfigPanel"), { ssr: false });
 
 type Status = "connected" | "connecting" | "disconnected";
 type Row = { userId: string; score: number; lastTs: number; events: number };
@@ -46,11 +46,19 @@ export default function DashboardPage() {
   const [minScore, setMinScore] = useState(0);
   const [sort, setSort] = useState<"scoreAsc" | "scoreDesc" | "eventsDesc">("scoreAsc");
 
-  // Portfolio (lazy fetch)
+  // Portfolio fetches
   const [portfolio, setPortfolio] = useState<PortfolioMetrics | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [percentiles, setPercentiles] = useState<{p10:number; p50:number; p90:number} | null>(null);
   const [heatmap, setHeatmap] = useState<number[][] | null>(null);
+  const [lift, setLift] = useState<any[] | null>(null);
+  const [eloss, setEloss] = useState<any[] | null>(null);
+
+  // Claims fetches
+  const [aging, setAging] = useState<any[] | null>(null);
+
+  // Calidad
+  const [quality, setQuality] = useState<any>(null);
 
   // Socket bootstrap
   useEffect(() => {
@@ -93,17 +101,22 @@ export default function DashboardPage() {
     return () => { clearInterval(id); socket.close(); };
   }, []);
 
-  // Fetch on tab change (portfolio)
+  // Carga por solapa
   useEffect(() => {
     if (tab === "portfolio") {
-      fetch("http://localhost:4000/metrics").then((r) => r.json()).then((j) => setPortfolio(j.metrics)).catch(() => setPortfolio(null));
-      fetch("http://localhost:4000/analytics").then((r) => r.json()).then((j) => setAnalytics(j.analytics)).catch(() => setAnalytics(null));
+      fetch("http://localhost:4000/metrics").then(r=>r.json()).then(j=>setPortfolio(j.metrics)).catch(()=>setPortfolio(null));
+      fetch("http://localhost:4000/analytics").then(r=>r.json()).then(j=>setAnalytics(j.analytics)).catch(()=>setAnalytics(null));
       fetch("http://localhost:4000/portfolio/percentiles").then(r=>r.json()).then(j=>setPercentiles(j.percentiles)).catch(()=>setPercentiles(null));
       fetch("http://localhost:4000/events/heatmap?days=7").then(r=>r.json()).then(j=>setHeatmap(j.matrix)).catch(()=>setHeatmap(null));
+      fetch("http://localhost:4000/portfolio/lift?days=90&bins=10").then(r=>r.json()).then(j=>setLift(j.items)).catch(()=>setLift(null));
+      fetch("http://localhost:4000/loss/expected?days=30&by=bucket").then(r=>r.json()).then(j=>setEloss(j.items)).catch(()=>setEloss(null));
+    }
+    if (tab === "claims") {
+      fetch("http://localhost:4000/claims/aging?days=90").then(r=>r.json()).then(j=>setAging(j.items)).catch(()=>setAging(null));
     }
   }, [tab]);
 
-  // KPIs globales (no filtrados)
+  // KPIs globales
   const now = Date.now();
   const active = rows.filter((r) => now - r.lastTs <= 5 * 60 * 1000).length;
   const avgScore = rows.length ? rows.reduce((a, b) => a + b.score, 0) / rows.length : 0;
@@ -111,35 +124,29 @@ export default function DashboardPage() {
   const criticalEvents = events.filter((e) => e.severity >= 4 && now - e.ts <= 15 * 60 * 1000).length;
   const scores = rows.map((r) => r.score);
 
-  // Filtros Realtime
+  // Filtros RT
   const filteredRows = React.useMemo(() => {
     let list = rows;
-    if (q.trim()) {
-      const needle = q.trim().toLowerCase();
-      list = list.filter((r) => r.userId.toLowerCase().includes(needle));
-    }
-    if (onlyActive) list = list.filter((r) => now - r.lastTs <= 5 * 60 * 1000);
-    if (minScore > 0) list = list.filter((r) => r.score >= minScore);
+    if (q.trim()) list = list.filter(r => r.userId.toLowerCase().includes(q.trim().toLowerCase()));
+    if (onlyActive) list = list.filter(r => now - r.lastTs <= 5*60*1000);
+    if (minScore > 0) list = list.filter(r => r.score >= minScore);
     switch (sort) {
-      case "scoreAsc": list = [...list].sort((a, b) => a.score - b.score); break;
-      case "scoreDesc": list = [...list].sort((a, b) => b.score - a.score); break;
-      case "eventsDesc": list = [...list].sort((a, b) => b.events - a.events); break;
+      case "scoreAsc":  list = [...list].sort((a,b)=>a.score-b.score); break;
+      case "scoreDesc": list = [...list].sort((a,b)=>b.score-a.score); break;
+      case "eventsDesc":list = [...list].sort((a,b)=>b.events-a.events); break;
     }
     return list;
   }, [rows, q, onlyActive, minScore, sort, now]);
 
-  const filteredUserIds = React.useMemo(() => new Set(filteredRows.map(r => r.userId)), [filteredRows]);
-  const seriesByUserFiltered = React.useMemo(() => {
-    const out: Record<string, { ts: number; score: number }[]> = {};
-    for (const uid of Object.keys(seriesByUser)) {
-      if (filteredUserIds.has(uid)) out[uid] = seriesByUser[uid];
-    }
+  const filteredUserIds = React.useMemo(()=> new Set(filteredRows.map(r=>r.userId)), [filteredRows]);
+  const seriesByUserFiltered = React.useMemo(()=>{
+    const out: Record<string, { ts:number; score:number }[]> = {};
+    for (const k of Object.keys(seriesByUser)) if (filteredUserIds.has(k)) out[k] = seriesByUser[k];
     return out;
   }, [seriesByUser, filteredUserIds]);
-  const eventsFiltered = React.useMemo(() => events.filter(e => filteredUserIds.has(e.userId)), [events, filteredUserIds]);
+  const eventsFiltered = React.useMemo(()=> events.filter(e=>filteredUserIds.has(e.userId)), [events, filteredUserIds]);
 
-  // Calidad (se carga dentro del componente Live/Quality vía fetch propio o podríamos levantar aquí)
-  const [quality, setQuality] = useState<any>(null);
+  // Calidad (refresh 5s)
   useEffect(() => {
     const load = () => fetch("http://localhost:4000/quality/metrics?minutes=60").then(r=>r.json()).then(j=>setQuality(j.quality)).catch(()=>setQuality(null));
     load();
@@ -147,9 +154,20 @@ export default function DashboardPage() {
     return ()=>clearInterval(t);
   }, []);
 
+  // Export CSV (tabla filtrada)
+  const exportCsv = () => {
+    const header = "userId,score,events,lastTs\\n";
+    const body = filteredRows.map(r => `${r.userId},${r.score.toFixed(2)},${r.events},${r.lastTs}`).join("\\n");
+    const blob = new Blob([header+body], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "realtime_filtered.csv"; a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <main className="min-h-screen p-6 md:p-10">
-      <header className="mb-6 flex items-center justify-between">
+      <header className="mb-6 flex items-center justify-between sticky top-0 bg-white/70 backdrop-blur z-10 p-2 rounded-xl border border-slate-200">
         <h1 className="text-2xl md:text-3xl font-bold">Seguface Dashboard</h1>
         <ConnectionBadge status={status} />
       </header>
@@ -157,11 +175,8 @@ export default function DashboardPage() {
       {/* Tabs */}
       <nav className="mb-6 flex gap-2">
         {(["realtime","portfolio","claims","drivers","sim"] as Tab[]).map((key) => (
-          <button
-            key={key}
-            onClick={() => setTab(key)}
-            className={`px-3 py-2 rounded-xl border ${tab===key ? "bg-slate-800 text-white border-slate-700" : "bg-slate-100 text-slate-700 border-slate-300"}`}
-          >
+          <button key={key} onClick={() => setTab(key)}
+            className={`px-3 py-2 rounded-xl border ${tab===key ? "bg-slate-800 text-white border-slate-700" : "bg-slate-100 text-slate-700 border-slate-300"}`}>
             {key.toUpperCase()}
           </button>
         ))}
@@ -172,23 +187,26 @@ export default function DashboardPage() {
         <>
           <KPICards total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
 
-          {/* Filtros */}
+          {/* Filtros + Export */}
           <section className="mt-4 mb-4 p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
             <div className="flex flex-wrap items-center gap-3">
-              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar conductor (user_001)…" className="px-3 py-2 rounded-lg border border-slate-300" />
+              <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Buscar conductor (user_001)…" className="px-3 py-2 rounded-lg border border-slate-300" />
               <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} /> Solo activos (5m)
+                <input type="checkbox" checked={onlyActive} onChange={(e)=>setOnlyActive(e.target.checked)} /> Solo activos (5m)
               </label>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-500">Score ≥ {minScore}</span>
-                <input type="range" min={0} max={100} step={1} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+                <input type="range" min={0} max={100} step={1} value={minScore} onChange={(e)=>setMinScore(Number(e.target.value))} />
               </div>
-              <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="px-3 py-2 rounded-lg border border-slate-300">
+              <select value={sort} onChange={(e)=>setSort(e.target.value as any)} className="px-3 py-2 rounded-lg border border-slate-300">
                 <option value="scoreAsc">Score ↑</option>
                 <option value="scoreDesc">Score ↓</option>
                 <option value="eventsDesc">Eventos ↓</option>
               </select>
-              <div className="ml-auto text-xs text-slate-500">{filteredRows.length} / {rows.length} conductores</div>
+              <div className="ml-auto flex items-center gap-3">
+                <div className="text-xs text-slate-500">{filteredRows.length} / {rows.length} conductores</div>
+                <button onClick={exportCsv} className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm">Export CSV</button>
+              </div>
             </div>
           </section>
 
@@ -204,7 +222,7 @@ export default function DashboardPage() {
             <HistogramScores scores={scores} />
           </section>
 
-          {/* Filtrado: MultiUser + Mapa + Tabla */}
+          {/* Filtrado */}
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 space-y-4">
               <MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} />
@@ -235,22 +253,29 @@ export default function DashboardPage() {
           <div>
             {heatmap ? <EventsHeatmap matrix={heatmap} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando heatmap…</div>}
           </div>
+
+          <div className="lg:col-span-2">
+            {lift ? <LiftDecilesChart items={lift} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando lift…</div>}
+          </div>
+          <div>
+            {eloss ? <ExpectedLossPanel rows={eloss} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando expected loss…</div>}
+          </div>
+        </section>
+      )}
+
+      {/* CLAIMS */}
+      {tab === "claims" && (
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-3">
+            {aging ? <ClaimsAgingPanel rows={aging} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando aging…</div>}
+          </div>
         </section>
       )}
 
       {/* DRIVERS (placeholder) */}
       {tab === "drivers" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-          <div className="text-sm text-slate-500">
-            Usá la solapa <strong>Realtime</strong> para buscar/filtrar conductores y entrá al detalle desde la tabla.
-          </div>
-        </section>
-      )}
-
-      {/* CLAIMS (sin cambios por ahora) */}
-      {tab === "claims" && (
-        <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-          <div className="text-sm text-slate-500">Próximamente KPIs/aging/severidad.</div>
+          <div className="text-sm text-slate-500">Usá Realtime para buscar/filtrar y abrir el detalle desde la tabla.</div>
         </section>
       )}
 

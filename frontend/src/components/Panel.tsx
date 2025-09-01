@@ -15,9 +15,7 @@ export default function Panel({
         </div>
         {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
       </header>
-      <div className="p-4">
-        {children}
-      </div>
+      <div className="p-4">{children}</div>
     </section>
   );
 }

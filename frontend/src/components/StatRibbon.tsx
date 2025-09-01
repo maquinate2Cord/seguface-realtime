@@ -13,10 +13,10 @@ export default function StatRibbon({
     </div>
   );
   return (
-    <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <div className="grid grid-cols-2 gap-3">
       <Item label="Conductores" value={String(total)} />
       <Item label="Activos (5m)" value={String(active)} />
-      <Item label="Score promedio" value={Number.isFinite(avgScore) ? avgScore.toFixed(1) : "—"} />
+      <Item label="Score prom." value={Number.isFinite(avgScore) ? avgScore.toFixed(1) : "—"} />
       <Item label="Riesgo alto (<60)" value={String(highRisk)} />
       <Item label="Eventos críticos" value={String(criticalEvents)} />
     </div>

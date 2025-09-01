@@ -217,66 +217,60 @@ export default function DashboardPage() {
       {/* REALTIME */}
       {tab === "realtime" && (
   <>
-    {/* 1) Ribbon ejecutivo */}
-    <StatRibbon
-      total={rows.length}
-      active={active}
-      avgScore={avgScore}
-      highRisk={highRisk}
-      criticalEvents={criticalEvents}
-    />
+    <PageHeaderPro title="Realtime • Flota" status={"Conectado"} />
 
-    {/* 2) Toolbar de filtros */}
-    <ToolbarProV3
-      q={q}
-      onQ={setQ}
-      onlyActive={onlyActive}
-      onOnlyActive={setOnlyActive}
-      minScore={minScore}
-      onMinScore={setMinScore}
-      sort={sort}
-      onSort={setSort}
-      range={range as any}
-      onRangeChange={setRange as any}
-      onExport={exportCsv}
-    />
+    <div className="grid grid-cols-12 gap-5">
+      {/* Rail izquierdo: resumen + filtros */}
+      <aside className="col-span-12 lg:col-span-3 space-y-4">
+        <Panel title="Resumen ejecutivo">
+          <StatRibbon
+            total={rows.length}
+            active={active}
+            avgScore={avgScore}
+            highRisk={highRisk}
+            criticalEvents={criticalEvents}
+          />
+        </Panel>
+        <Panel title="Filtros">
+          <ToolbarProV3
+            q={q}
+            onQ={setQ}
+            onlyActive={onlyActive}
+            onOnlyActive={setOnlyActive}
+            minScore={minScore}
+            onMinScore={setMinScore}
+            sort={sort}
+            onSort={setSort}
+            range={range as any}
+            onRangeChange={setRange as any}
+            onExport={exportCsv}
+          />
+        </Panel>
+      </aside>
 
-    {/* 3) Monitoreo */}
-    <div className="grid grid-cols-12 gap-4 mt-4">
-      <div className="col-span-12 lg:col-span-8">
+      {/* Área principal */}
+      <section className="col-span-12 lg:col-span-9 space-y-4">
         <Panel title="Tendencia (pulso global)" subtitle="Score promedio vs. tiempo">
-          <div className="h-72">
-            <TrendChart series={series} />
-          </div>
+          <div className="h-80"><TrendChart series={series} /></div>
         </Panel>
-      </div>
-      <div className="col-span-12 lg:col-span-4">
-        <Panel title="Distribución de scores" subtitle="Histograma de la última ventana">
-          <div className="h-72">
-            <HistogramScores scores={scores} />
-          </div>
-        </Panel>
-      </div>
 
-      {/* 4) Análisis */}
-      <div className="col-span-12 lg:col-span-7">
-        <Panel title="Series por usuario (filtrado)" subtitle="Top N por actividad reciente">
-          <div className="h-80">
-            <MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} />
-          </div>
-        </Panel>
-      </div>
-      <div className="col-span-12 lg:col-span-5">
-        <Panel title="Eventos de riesgo (filtrados)" subtitle="Ubicación y severidad">
-          <div className="h-80">
-            <RiskMap events={eventsFiltered} />
-          </div>
-        </Panel>
-      </div>
+        <div className="grid grid-cols-12 gap-4">
+          <Panel className="col-span-12 lg:col-span-5" title="Distribución de scores" subtitle="Última ventana">
+            <div className="h-72"><HistogramScores scores={scores} /></div>
+          </Panel>
+          <Panel className="col-span-12 lg:col-span-7" title="Series por usuario (filtrado)" subtitle="Top N por actividad">
+            <div className="h-72"><MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} /></div>
+          </Panel>
+        </div>
 
-      {/* 5) Operación */}
+        <Panel title="Mapa de eventos de riesgo (filtrados)" subtitle="Ubicación y severidad">
+          <div className="h-80"><RiskMap events={eventsFiltered} /></div>
+        </Panel>
+      </section>
+
+      {/* Operación: tabla completa */}
       <div className="col-span-12">
-        <Panel title="Detalle operativo (filtrado)" subtitle="Clic para abrir la ficha del conductor">
+        <Panel title="Detalle operativo (filtrado)" subtitle="Abrí un conductor para ver su ficha">
           <ScoreTable
             rows={filteredRows}
             seriesByUser={seriesByUserFiltered}

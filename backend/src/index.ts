@@ -9,6 +9,7 @@ import { z } from "zod";
 
 import { config } from "./config";
 import { getTop, toLean, incEvents } from "./store";
+import { getSimConfig, updateSimConfig, resetSimConfig } from "./scoring";
 import type { LeanState } from "./types";
 import { bus } from "./bus";
 
@@ -73,6 +74,36 @@ app.post("/claims", (req, res) => {
 // === Socket.IO bootstrap + streams
 io.on("connection", (socket) => {
   socket.emit("bootstrap", { items: getTop(200).map(toLean) });
+
+// === Sim Config (runtime tuning)
+const simPatchSchema = z.object({
+  targetScore: z.number().min(0).max(100).optional(),
+  kPull: z.number().min(0).max(1).optional(),
+  noiseStd: z.number().min(0).max(5).optional(),
+  maxDeltaUp: z.number().min(0).max(10).optional(),
+  maxDeltaDown: z.number().min(-10).max(0).optional(),
+  coolDownMs: z.number().int().min(0).max(600000).optional(),
+  prob: z.object({
+    overSpeed: z.number().min(0).max(1).optional(),
+    hardBrake: z.number().min(0).max(1).optional(),
+    hardAccel: z.number().min(0).max(1).optional(),
+  }).partial().optional()
+}).partial();
+
+app.get("/sim-config", (_req, res) => res.json({ config: getSimConfig() }));
+
+app.patch("/sim-config", (req, res) => {
+  const parsed = simPatchSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
+  const cfg = updateSimConfig(parsed.data);
+  return res.json({ config: cfg });
+});
+
+app.post("/sim-config/reset", (_req, res) => {
+  const cfg = resetSimConfig();
+  return res.json({ config: cfg });
+});
+
 });
 
 // bridge bus → io
@@ -88,4 +119,5 @@ server.listen(config.port, () => {
   console.log(`Seguface backend running on http://localhost:${config.port}`);
   if (config.simulator.enabled) import("./simulator");
 });
+
 

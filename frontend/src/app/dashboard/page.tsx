@@ -1,351 +1,287 @@
 "use client";
-import React, { useEffect, useRef, useState } from "react";
+
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import io from "socket.io-client";
 import dynamic from "next/dynamic";
 
-import ConnectionBadge from "@/components/ConnectionBadge";
-import EnhancedKPIs from "@/components/EnhancedKPIs";
-import HistogramScores from "@/components/HistogramScores";
-import TrendChart from "@/components/TrendChart";
-import RiskMap from "@/components/RiskMap";
-import MultiUserChart from "@/components/MultiUserChart";
-import ScoreTable from "@/components/ScoreTable";
+/** Cargamos gráficos pesados en cliente (mejor TTFB) */
+const TrendChart = dynamic(() => import("@/components/TrendChart"), { ssr: false, loading: () => <div className="h-full animate-pulse bg-slate-100 rounded-xl" /> });
+const HistogramScores = dynamic(() => import("@/components/HistogramScores"), { ssr: false, loading: () => <div className="h-full animate-pulse bg-slate-100 rounded-xl" /> });
+const MultiUserChart = dynamic(() => import("@/components/MultiUserChart"), { ssr: false, loading: () => <div className="h-full animate-pulse bg-slate-100 rounded-xl" /> });
+const RiskMap = dynamic(() => import("@/components/RiskMap"), { ssr: false, loading: () => <div className="h-full animate-pulse bg-slate-100 rounded-xl" /> });
+const ScoreTable = dynamic(() => import("@/components/ScoreTable"), { ssr: false, loading: () => <div className="h-40 animate-pulse bg-slate-100 rounded-xl" /> });
 
-import PercentilesBands from "@/components/PercentilesBands";
-import EventsHeatmap from "@/components/EventsHeatmap";
-import QualityPanel from "@/components/QualityPanel";
-import LiveAlerts from "@/components/LiveAlerts";
-import LiftDecilesChart from "@/components/LiftDecilesChart";
-import ExpectedLossPanel from "@/components/ExpectedLossPanel";
-import ClaimsAgingPanel from "@/components/ClaimsAgingPanel";
-
-import DriftPanel from "@/components/DriftPanel";
-import CalibrationChart from "@/components/CalibrationChart";
-import ModelHealthBadge from "@/components/ModelHealthBadge";
-
-const SimConfigPanel = dynamic(() => import("@/components/SimConfigPanel"), { ssr: false });
-
-type Status = "connected" | "connecting" | "disconnected";
+/** ====== Tipos mínimos ====== */
 type Row = { userId: string; score: number; lastTs: number; events: number };
 type Point = { ts: number; avg: number };
 type RiskEvt = { userId: string; ts: number; type: "overSpeed" | "hardBrake" | "hardAccel"; lat: number; lng: number; severity: number };
 
-type PortfolioMetrics = { totalDrivers: number; activeVehicles: number; avgScore: number; highRisk: number; updatedAt: number };
-type Analytics = { buckets: { name: "High" | "Medium" | "Low"; count: number }[]; topRisk: { userId: string; score: number; lastTs: number; events: number }[] };
+/** ====== UI locales (sin imports extra) ====== */
+function TopBar({ right }: { right?: React.ReactNode }) {
+  return (
+    <header className="h-14 grid grid-cols-[1fr_auto] items-center border-b border-slate-200 px-4 bg-white">
+      <div className="flex items-center gap-3">
+        <div className="font-semibold tracking-tight">Seguface Dashboard</div>
+        <span className="hidden md:inline text-xs text-slate-500">Realtime Risk & Ops</span>
+      </div>
+      <div className="flex items-center gap-2">{right}</div>
+    </header>
+  );
+}
 
-type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
+type TabKey = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
+
+function SideNav({ value, onChange }: { value: TabKey; onChange: (k: TabKey) => void }) {
+  const items: { key: TabKey; label: string }[] = [
+    { key: "realtime", label: "Realtime" },
+    { key: "portfolio", label: "Portfolio" },
+    { key: "claims", label: "Claims" },
+    { key: "drivers", label: "Drivers" },
+    { key: "sim", label: "Sim" },
+    { key: "model", label: "Model" },
+  ];
+  return (
+    <aside className="hidden md:block w-[240px] shrink-0">
+      <div className="sticky top-4 rounded-2xl overflow-hidden border border-slate-200">
+        <div className="bg-slate-900 text-white px-4 py-3 text-sm font-semibold">Menú</div>
+        <nav className="bg-white p-2">
+          {items.map((it) => {
+            const active = it.key === value;
+            return (
+              <button
+                key={it.key}
+                onClick={() => onChange(it.key)}
+                className={`w-full text-left rounded-xl px-3 py-2 transition border mb-1
+                  ${active ? "bg-slate-900 text-white border-slate-900"
+                           : "bg-white text-slate-800 border-slate-200 hover:bg-slate-50"}`}
+              >
+                {it.label}
+              </button>
+            );
+          })}
+        </nav>
+      </div>
+    </aside>
+  );
+}
+
+function Panel({
+  title, subtitle, actions, className = "", children,
+}: { title: string; subtitle?: string; actions?: React.ReactNode; className?: string; children: React.ReactNode }) {
+  return (
+    <section className={`rounded-2xl border border-slate-200 bg-white ${className}`}>
+      <header className="px-4 pt-3 pb-2 border-b border-slate-100 flex items-end justify-between">
+        <div>
+          <div className="text-sm font-semibold">{title}</div>
+          {subtitle ? <div className="text-xs text-slate-500 mt-0.5">{subtitle}</div> : null}
+        </div>
+        {actions}
+      </header>
+      <div className="p-4">{children}</div>
+    </section>
+  );
+}
+
+function KPIRibbon({
+  total, active, avgScore, highRisk, criticalEvents,
+}: { total: number; active: number; avgScore: number; highRisk: number; criticalEvents: number }) {
+  const Item = ({ label, value }: { label: string; value: string }) => (
+    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-0.5 text-2xl font-semibold tabular-nums">{value}</div>
+    </div>
+  );
+  return (
+    <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <Item label="Conductores" value={String(total)} />
+      <Item label="Activos (5m)" value={String(active)} />
+      <Item label="Score promedio" value={Number.isFinite(avgScore) ? avgScore.toFixed(1) : "—"} />
+      <Item label="Riesgo alto (<60)" value={String(highRisk)} />
+      <Item label="Eventos críticos" value={String(criticalEvents)} />
+    </div>
+  );
+}
+
+/** ====== Página ====== */
 export default function DashboardPage() {
-  const [status, setStatus] = useState<Status>("connecting");
+  const [tab, setTab] = useState<TabKey>("realtime");
+
   const [rows, setRows] = useState<Row[]>([]);
+  const [scores, setScores] = useState<number[]>([]);
   const [series, setSeries] = useState<Point[]>([]);
   const [events, setEvents] = useState<RiskEvt[]>([]);
-  const [seriesByUser, setSeriesByUser] = useState<Record<string, { ts: number; score: number }[]>>({});
-  const lastRiskByUser = useRef<Record<string, RiskEvt | undefined>>({});
-  const buffer = useRef<number[]>([]);
-  const [tab, setTab] = useState<Tab>("realtime");
-  // Filtros Realtime
+
+  // filtros
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
   const [minScore, setMinScore] = useState(0);
   const [sort, setSort] = useState<"scoreAsc" | "scoreDesc" | "eventsDesc">("scoreAsc");
 
-  // Portfolio fetches
-  const [portfolio, setPortfolio] = useState<PortfolioMetrics | null>(null);
-  const [analytics, setAnalytics] = useState<Analytics | null>(null);
-  const [percentiles, setPercentiles] = useState<{p10:number; p50:number; p90:number} | null>(null);
-  const [heatmap, setHeatmap] = useState<number[][] | null>(null);
-  const [lift, setLift] = useState<any[] | null>(null);
-  const [eloss, setEloss] = useState<any[] | null>(null);
-
-  // Claims
-  const [aging, setAging] = useState<any[] | null>(null);
-
-  // Calidad
-  const [quality, setQuality] = useState<any>(null);
-
-  // MODEL / MLOps
-  const [drift, setDrift] = useState<any>(null);
-  const [calib, setCalib] = useState<any>(null);
-  const [brier, setBrier] = useState<number | null>(null);
-  const [health, setHealth] = useState<any>(null);
-
-  // Socket bootstrap
+  // bootstrap + realtime
   useEffect(() => {
-    const socket = io("http://localhost:4000", { transports: ["websocket"] });
-    socket.on("connect", () => setStatus("connected"));
-    socket.on("disconnect", () => setStatus("disconnected"));
-    socket.on("connect_error", () => setStatus("disconnected"));
+    fetch("http://localhost:4000/dashboard")
+      .then((r) => r.json())
+      .then((j) => {
+        setRows(j.scores ?? []);
+        setScores(j.distribution ?? []);
+        setSeries(j.trend ?? []);
+        setEvents(j.events ?? []);
+      })
+      .catch(() => {});
 
-    socket.on("bootstrap", (p: { items: Row[] }) => setRows(p.items || []));
+    const socket = io("http://localhost:4000", { transports: ["websocket"] });
     socket.on("score:update", (msg: { state: Row }) => {
       setRows((prev) => {
-        const m = new Map<string, Row>(prev.map((r) => [r.userId, r]));
-        m.set(msg.state.userId, msg.state);
-        return Array.from(m.values());
-      });
-      buffer.current.push(msg.state.score);
-      setSeriesByUser((prev) => {
-        const next = { ...prev };
-        const arr = next[msg.state.userId] || [];
-        arr.push({ ts: Date.now(), score: msg.state.score });
-        next[msg.state.userId] = arr.slice(-200);
-        return next;
+        const map = new Map(prev.map((r) => [r.userId, r]));
+        map.set(msg.state.userId, { ...(map.get(msg.state.userId) || {}), ...msg.state });
+        return Array.from(map.values());
       });
     });
     socket.on("risk:event", (payload: { event: RiskEvt }) => {
-      setEvents((prev) => [...prev.slice(-499), payload.event]);
-      lastRiskByUser.current[payload.event.userId] = payload.event;
+      setEvents((prev) => [...prev.slice(-199), payload.event]);
     });
-
-    const id = setInterval(() => {
-      if (buffer.current.length) {
-        const avg = buffer.current.reduce((a, b) => a + b, 0) / buffer.current.length;
-        buffer.current = [];
-        setSeries((s) => [...s.slice(-200), { ts: Date.now(), avg }]);
-      } else {
-        setSeries((s) => [...s.slice(-200), { ts: Date.now(), avg: s.at(-1)?.avg ?? 80 }]);
-      }
-    }, 3000);
-
-    return () => { clearInterval(id); socket.close(); };
+    return () => socket.close();
   }, []);
 
-  // Carga por solapa
-  useEffect(() => {
-    if (tab === "portfolio") {
-      fetch("http://localhost:4000/metrics").then(r=>r.json()).then(j=>setPortfolio(j.metrics)).catch(()=>setPortfolio(null));
-      fetch("http://localhost:4000/analytics").then(r=>r.json()).then(j=>setAnalytics(j.analytics)).catch(()=>setAnalytics(null));
-      fetch("http://localhost:4000/portfolio/percentiles").then(r=>r.json()).then(j=>setPercentiles(j.percentiles)).catch(()=>setPercentiles(null));
-      fetch("http://localhost:4000/events/heatmap?days=7").then(r=>r.json()).then(j=>setHeatmap(j.matrix)).catch(()=>setHeatmap(null));
-      fetch("http://localhost:4000/portfolio/lift?days=90&bins=10").then(r=>r.json()).then(j=>setLift(j.items)).catch(()=>setLift(null));
-      fetch("http://localhost:4000/loss/expected?days=30&by=bucket").then(r=>r.json()).then(j=>setEloss(j.items)).catch(()=>setEloss(null));
-    }
-    if (tab === "claims") {
-      fetch("http://localhost:4000/claims/aging?days=90").then(r=>r.json()).then(j=>setAging(j.items)).catch(()=>setAging(null));
-    }
-    if (tab === "model") {
-      fetch("http://localhost:4000/model/drift?bins=20").then(r=>r.json()).then(setDrift).catch(()=>setDrift(null));
-      fetch("http://localhost:4000/model/calibration?days=90&bins=10&beta=0.25").then(r=>r.json()).then(setCalib).catch(()=>setCalib(null));
-      fetch("http://localhost:4000/model/brier?days=90&beta=0.25").then(r=>r.json()).then(j=>setBrier(j.brier)).catch(()=>setBrier(null));
-      fetch("http://localhost:4000/model/health?bins=20&days=90&beta=0.25").then(r=>r.json()).then(setHealth).catch(()=>setHealth(null));
-    }
-  }, [tab]);
-
-  // KPIs globales
+  // KPIs
   const now = Date.now();
-  const active = rows.filter((r) => now - r.lastTs <= 5 * 60 * 1000).length;
-  const avgScore = rows.length ? rows.reduce((a, b) => a + b.score, 0) / rows.length : 0;
-  const highRisk = rows.filter((r) => r.score < 60).length;
-  const criticalEvents = events.filter((e) => e.severity >= 4 && now - e.ts <= 15 * 60 * 1000).length;
-  const scores = rows.map((r) => r.score);
+  const active = useMemo(() => rows.filter((r) => now - r.lastTs <= 5 * 60 * 1000).length, [rows, now]);
+  const avgScore = useMemo(() => (rows.length ? rows.reduce((a, b) => a + (b.score ?? 0), 0) / rows.length : 0), [rows]);
+  const highRisk = useMemo(() => rows.filter((r) => (r.score ?? 0) < 60).length, [rows]);
+  const criticalEvents = useMemo(() => events.filter((e) => e.severity >= 0.8).length, [events]);
 
-  // Filtros RT
-  const filteredRows = React.useMemo(() => {
-    let list = rows;
-    if (q.trim()) list = list.filter(r => r.userId.toLowerCase().includes(q.trim().toLowerCase()));
-    if (onlyActive) list = list.filter(r => now - r.lastTs <= 5*60*1000);
-    if (minScore > 0) list = list.filter(r => r.score >= minScore);
-    switch (sort) {
-      case "scoreAsc":  list = [...list].sort((a,b)=>a.score-b.score); break;
-      case "scoreDesc": list = [...list].sort((a,b)=>b.score-a.score); break;
-      case "eventsDesc":list = [...list].sort((a,b)=>b.events-a.events); break;
-    }
-    return list;
+  // Filtro de tabla
+  const filteredRows = useMemo(() => {
+    let out = rows;
+    if (q) out = out.filter((r) => r.userId.includes(q));
+    if (onlyActive) out = out.filter((r) => now - r.lastTs <= 5 * 60 * 1000);
+    if (minScore) out = out.filter((r) => (r.score ?? 0) >= minScore);
+    if (sort === "scoreAsc") out = [...out].sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
+    if (sort === "scoreDesc") out = [...out].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    if (sort === "eventsDesc") out = [...out].sort((a, b) => (b.events ?? 0) - (a.events ?? 0));
+    return out;
   }, [rows, q, onlyActive, minScore, sort, now]);
 
-  const filteredUserIds = React.useMemo(()=> new Set(filteredRows.map(r=>r.userId)), [filteredRows]);
-  const seriesByUserFiltered = React.useMemo(()=>{
-    const out: Record<string, { ts:number; score:number }[]> = {};
-    for (const k of Object.keys(seriesByUser)) if (filteredUserIds.has(k)) out[k] = seriesByUser[k];
-    return out;
-  }, [seriesByUser, filteredUserIds]);
-  const eventsFiltered = React.useMemo(()=> events.filter(e=>filteredUserIds.has(e.userId)), [events, filteredUserIds]);
-
-  // Export CSV (tabla filtrada)
-  const exportCsv = () => {
-    const header = "userId,score,events,lastTs\n";
-    const body = filteredRows.map(r => `${r.userId},${r.score.toFixed(2)},${r.events},${r.lastTs}`).join("\n");
-    const blob = new Blob([header+body], { type: "text/csv;charset=utf-8" });
+  // Export CSV
+  const onExport = () => {
+    const header = ["userId", "score", "events", "lastTs"];
+    const lines = filteredRows.map((r) => [r.userId, r.score, r.events, r.lastTs].join(","));
+    const blob = new Blob([[header.join(","), ...lines].join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = "realtime_filtered.csv"; a.click();
+    a.href = url;
+    a.download = `seguface-rows.csv`;
+    a.click();
     URL.revokeObjectURL(url);
   };
 
-  // Reset baseline drift
-  const resetBaseline = async () => {
-    await fetch("http://localhost:4000/model/baseline/snapshot?bins=20", { method: "POST" });
-    const d = await fetch("http://localhost:4000/model/drift?bins=20").then(r=>r.json());
-    setDrift(d);
-    const h = await fetch("http://localhost:4000/model/health?bins=20&days=90&beta=0.25").then(r=>r.json());
-    setHealth(h);
-  };
+  /** ====== CONTENIDOS POR SECCIÓN ====== */
+  const Realtime = (
+    <>
+      {/* Ribbon KPI */}
+      <KPIRibbon total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
 
-  return (
-    <main className="min-h-screen p-6 md:p-10">
-      <header className="mb-6 flex items-center justify-between sticky top-0 bg-white/70 backdrop-blur z-10 p-2 rounded-xl border border-slate-200">
-        <h1 className="text-2xl md:text-3xl font-bold">Seguface Dashboard</h1>
-        <div className="flex items-center gap-3">
-          {health ? <ModelHealthBadge status={health.status} psi={health.psi} ks={health.ks} brier={health.brier} /> : null}
-          <ConnectionBadge status={status} />
-        </div>
-      </header>
-
-      {/* Tabs */}
-      <nav className="mb-6 flex gap-2">
-        {(["realtime","portfolio","claims","drivers","sim","model"] as Tab[]).map((key) => (
-          <button key={key} onClick={() => setTab(key)}
-            className={`px-3 py-2 rounded-xl border ${tab===key ? "bg-slate-800 text-white border-slate-700" : "bg-slate-100 text-slate-700 border-slate-300"}`}>
-            {key.toUpperCase()}
-          </button>
-        ))}
-      </nav>
-
-      {/* REALTIME */}
-      {tab === "realtime" && (
-  <>
-    <div className="grid grid-cols-12 gap-5">
-      {/* Rail izquierdo: KPIs ejecutivos */}
-      <aside className="col-span-12 lg:col-span-3 space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-xs font-semibold text-slate-500 mb-2">Resumen</div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-[11px] uppercase text-slate-500">Conductores</div>
-              <div className="text-2xl font-semibold tabular-nums">{rows.length}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-[11px] uppercase text-slate-500">Activos (5m)</div>
-              <div className="text-2xl font-semibold tabular-nums">{active}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-3 col-span-2">
-              <div className="text-[11px] uppercase text-slate-500">Score promedio</div>
-              <div className="text-2xl font-semibold tabular-nums">{Number.isFinite(avgScore) ? avgScore.toFixed(1) : "—"}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-[11px] uppercase text-slate-500">Riesgo alto (&lt;60)</div>
-              <div className="text-2xl font-semibold tabular-nums">{highRisk}</div>
-            </div>
-            <div className="rounded-xl border border-slate-200 p-3">
-              <div className="text-[11px] uppercase text-slate-500">Eventos críticos</div>
-              <div className="text-2xl font-semibold tabular-nums">{criticalEvents}</div>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      {/* Área principal */}
-      <section className="col-span-12 lg:col-span-9 space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-sm font-semibold text-slate-800 mb-2">Tendencia (pulso global)</div>
-          <div className="h-80"><TrendChart series={series} /></div>
-        </div>
-
-        <div className="grid grid-cols-12 gap-4">
-          <div className="col-span-12 lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-sm font-semibold text-slate-800 mb-2">Distribución de scores</div>
-            <div className="h-72"><HistogramScores scores={scores} /></div>
-          </div>
-          <div className="col-span-12 lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-4">
-            <div className="text-sm font-semibold text-slate-800 mb-2">Series por usuario (filtrado)</div>
-            <div className="h-72"><MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} /></div>
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-sm font-semibold text-slate-800 mb-2">Mapa de eventos de riesgo (filtrados)</div>
-          <div className="h-80"><RiskMap events={eventsFiltered} /></div>
-        </div>
-      </section>
-
-      {/* Operación: tabla completa */}
-      <div className="col-span-12">
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <div className="text-sm font-semibold text-slate-800 mb-2">Detalle operativo (filtrado)</div>
-          <ScoreTable
-            rows={filteredRows}
-            seriesByUser={seriesByUserFiltered}
-            lastRiskByUser={lastRiskByUser.current}
+      {/* Toolbar */}
+      <div className="rounded-2xl border border-slate-200 bg-white p-3 mt-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <input
+            defaultValue={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Buscar conductor (user_001)…"
+            className="px-3 py-2 rounded-lg border border-slate-300 bg-white w-64"
           />
+          <label className="flex items-center gap-2 text-sm px-3 py-2 rounded-lg border border-slate-300 bg-slate-50">
+            <input type="checkbox" className="accent-emerald-600" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} />
+            <span>Solo activos (5m)</span>
+          </label>
+          <div className="flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-300 bg-slate-50">
+            <span className="text-xs text-slate-500">Score ≥ {minScore}</span>
+            <input type="range" min={0} max={100} step={1} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-xs text-slate-500">Orden</span>
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as any)}
+              className="px-3 py-2 rounded-lg border border-slate-300 bg-white"
+            >
+              <option value="scoreAsc">Score ↑</option>
+              <option value="scoreDesc">Score ↓</option>
+              <option value="eventsDesc">Eventos</option>
+            </select>
+          </div>
+          <div className="ml-auto">
+            <button onClick={onExport} className="px-3 py-2 rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-sm">
+              Export CSV
+            </button>
+          </div>
         </div>
       </div>
+
+      {/* Monitoreo (tendencia + distribución) */}
+      <div className="grid grid-cols-12 gap-4 mt-4">
+        <div className="col-span-12 xl:col-span-8">
+          <Panel title="Tendencia (pulso global)" subtitle="Score promedio vs. tiempo">
+            <div className="h-72">
+              <TrendChart series={series} />
+            </div>
+          </Panel>
+        </div>
+        <div className="col-span-12 xl:col-span-4">
+          <Panel title="Distribución de scores" subtitle="Última ventana">
+            <div className="h-72">
+              <HistogramScores scores={scores} />
+            </div>
+          </Panel>
+        </div>
+
+        {/* Análisis (multiusuario + mapa) */}
+        <div className="col-span-12 xl:col-span-7">
+          <Panel title="Series por usuario (filtrado)" subtitle="Top N por actividad">
+            <div className="h-80">
+              {/* Si no tenés series por usuario aún, dejalo vacío o pasá tu objeto real */}
+              <MultiUserChart seriesByUser={{} as any} limit={8} />
+            </div>
+          </Panel>
+        </div>
+        <div className="col-span-12 xl:col-span-5">
+          <Panel title="Eventos de riesgo (filtrados)" subtitle="Ubicación y severidad">
+            <div className="h-80">
+              <RiskMap events={events as any} />
+            </div>
+          </Panel>
+        </div>
+
+        {/* Operación (tabla) */}
+        <div className="col-span-12">
+          <Panel title="Detalle operativo (filtrado)" subtitle="Abrí un conductor para ver su ficha">
+            <ScoreTable rows={filteredRows as any} seriesByUser={{} as any} lastRiskByUser={{} as any} />
+          </Panel>
+        </div>
+      </div>
+    </>
+  );
+
+  const Placeholder = (name: string) => (
+    <Panel title={name} subtitle="En construcción">
+      <div className="text-sm text-slate-500">La navegación ahora es por menú lateral. Esta sección se renderiza aquí.</div>
+    </Panel>
+  );
+
+  return (
+    <div className="min-h-screen grid grid-rows-[56px_1fr] bg-slate-50 text-slate-900">
+      <TopBar />
+      <div className="max-w-7xl mx-auto w-full grid grid-cols-1 md:grid-cols-[240px_1fr] gap-6 px-4 py-4">
+        <SideNav value={tab} onChange={setTab} />
+        <main className="space-y-6">
+          {tab === "realtime" && Realtime}
+          {tab === "portfolio" && Placeholder("Portfolio")}
+          {tab === "claims" && Placeholder("Claims")}
+          {tab === "drivers" && Placeholder("Drivers")}
+          {tab === "sim" && Placeholder("Sim")}
+          {tab === "model" && Placeholder("Model Health")}
+        </main>
+      </div>
     </div>
-  </>
-)}
-
-      {/* PORTFOLIO */}
-      {tab === "portfolio" && (
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-3">
-            {portfolio
-              ? <div className="mb-4 p-4 rounded-xl border border-slate-200 bg-white text-slate-700">
-                  <div className="text-sm">Metrics</div>
-                  <div className="text-xl font-semibold">
-                    Drivers: {portfolio.totalDrivers} · Activos: {portfolio.activeVehicles} · Avg: {portfolio.avgScore} · HighRisk: {portfolio.highRisk}
-                  </div>
-                </div>
-              : <div className="text-sm text-slate-500">Cargando métricas…</div>}
-          </div>
-
-          <div className="lg:col-span-2">
-            {percentiles ? <PercentilesBands p10={percentiles.p10} p50={percentiles.p50} p90={percentiles.p90} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando percentiles…</div>}
-          </div>
-          <div>
-            {heatmap ? <EventsHeatmap matrix={heatmap} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando heatmap…</div>}
-          </div>
-
-          <div className="lg:col-span-2">
-            {lift ? <LiftDecilesChart items={lift} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando lift…</div>}
-          </div>
-          <div>
-            {eloss ? <ExpectedLossPanel rows={eloss} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando expected loss…</div>}
-          </div>
-        </section>
-      )}
-
-      {/* CLAIMS */}
-      {tab === "claims" && (
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-3">
-            {aging ? <ClaimsAgingPanel rows={aging} /> : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando aging…</div>}
-          </div>
-        </section>
-      )}
-
-      {/* DRIVERS */}
-      {tab === "drivers" && (
-        <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-          <div className="text-sm text-slate-500">Usá Realtime para buscar/filtrar y abrir el detalle desde la tabla.</div>
-        </section>
-      )}
-
-      {/* SIM */}
-      {tab === "sim" && (
-        <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-          <SimConfigPanel />
-        </section>
-      )}
-
-      {/* MODEL */}
-      {tab === "model" && (
-        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-3">
-            {drift
-              ? <DriftPanel psi={drift.psi} ks={drift.ks} bins={drift.current.bins} base={drift.baseline.probs} cur={drift.current.probs} onReset={resetBaseline} />
-              : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando drift…</div>}
-          </div>
-          <div className="lg:col-span-2">
-            {calib
-              ? <CalibrationChart items={calib.items} mae={calib.mae} brier={typeof brier==="number"?brier:undefined} />
-              : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando calibración…</div>}
-          </div>
-          <div>
-            {health
-              ? <ModelHealthBadge status={health.status} psi={health.psi} ks={health.ks} brier={health.brier} />
-              : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando health…</div>}
-          </div>
-        </section>
-      )}
-    </main>
   );
 }

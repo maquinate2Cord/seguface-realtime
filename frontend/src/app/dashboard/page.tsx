@@ -35,6 +35,7 @@ type Analytics = { buckets: { name: "High" | "Medium" | "Low"; count: number }[]
 
 type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
 
+
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [rows, setRows] = useState<Row[]>([]);
@@ -209,7 +210,7 @@ export default function DashboardPage() {
           <EnhancedKPIs total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
 
           {/* Filtros + Export */}
-          <ProFilterBar
+          <ProFilterBarNA
   q={q}
   onQ={setQ}
   onlyActive={onlyActive}

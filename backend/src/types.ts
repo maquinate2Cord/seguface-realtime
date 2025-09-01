@@ -1,4 +1,4 @@
-export type Telemetry = {
+﻿export type Telemetry = {
   userId: string;
   ts: number;
   speedKph: number;
@@ -24,3 +24,4 @@ export type LeanState = {
   lastTs: number;
   events: number;
 };
+

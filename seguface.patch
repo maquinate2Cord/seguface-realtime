@@ -1,0 +1,509 @@
+*** BEGIN PATCH ***
+diff --git a/backend/src/types.ts b/backend/src/types.ts
+new file mode 100644
+index 0000000..1111111
+--- /dev/null
++++ b/backend/src/types.ts
+@@ -0,0 +1,48 @@
++export type Telemetry = {
++  userId: string;
++  ts: number;          // epoch ms
++  speedKph: number;
++  rpm: number;
++  throttle: number;    // 0..100
++  accel: number;       // m/s^2 aproximado
++  brake: number;       // m/s^2 aproximado
++  lat: number;
++  lng: number;
++};
++
++export type DriverState = {
++  userId: string;
++  score: number;
++  lastTs: number;
++  events: number;
++};
++
++export type Claim = {
++  id: string;
++  userId: string;
++  ts: number;       // epoch ms
++  severity: number; // 1..5
++  costUsd: number;  // costo simulado
++  lat: number;
++  lng: number;
++};
+diff --git a/backend/src/claims.ts b/backend/src/claims.ts
+new file mode 100644
+index 0000000..2222222
+--- /dev/null
++++ b/backend/src/claims.ts
+@@ -0,0 +1,24 @@
++import type { Claim } from './types.js';
++
++const claims: Claim[] = [];
++
++export function addClaim(c: Claim) {
++  claims.push(c);
++  // mantener acotado
++  if (claims.length > 1000) claims.shift();
++}
++
++export function getRecentClaims(days = 30): Claim[] {
++  const since = Date.now() - days * 24 * 60 * 60 * 1000;
++  return claims.filter(c => c.ts >= since);
++}
++
++export function getAllClaims(): Claim[] {
++  return claims.slice();
++}
+diff --git a/backend/src/metrics.ts b/backend/src/metrics.ts
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/backend/src/metrics.ts
+@@ -0,0 +1,64 @@
++import type { DriverState } from './types.js';
++import { getRecentClaims } from './claims.js';
++
++export function computeMetrics(all: DriverState[]) {
++  const now = Date.now();
++  const active = all.filter(r => now - r.lastTs <= 5 * 60 * 1000);
++  const total = all.length;
++  const avgScore = total ? all.reduce((a, b) => a + b.score, 0) / total : 0;
++
++  const buckets = { b0_59: 0, b60_74: 0, b75_89: 0, b90_100: 0 };
++  for (const r of all) {
++    if (r.score < 60) buckets.b0_59++;
++    else if (r.score < 75) buckets.b60_74++;
++    else if (r.score < 90) buckets.b75_89++;
++    else buckets.b90_100++;
++  }
++
++  const highRisk = buckets.b0_59;
++  const recent = getRecentClaims(30);
++  const claimRate = total ? recent.length / total : 0;
++  const avgSeverity = recent.length ? recent.reduce((a, b) => a + b.severity, 0) / recent.length : 0;
++  const avgCost = recent.length ? recent.reduce((a, b) => a + b.costUsd, 0) / recent.length : 0;
++  const expectedLoss = (claimRate * (avgSeverity || 1) * (avgCost || 2000));
++
++  return {
++    total,
++    active: active.length,
++    avgScore,
++    highRisk,
++    buckets,
++    claims30d: recent.length,
++    claimRate,
++    avgSeverity,
++    avgCost,
++    expectedLoss,
++  };
++}
+diff --git a/backend/src/scoring.ts b/backend/src/scoring.ts
+new file mode 100644
+index 0000000..4444444
+--- /dev/null
++++ b/backend/src/scoring.ts
+@@ -0,0 +1,106 @@
++import type { Telemetry } from './types.js';
++
++// ---------- parámetros “realistas” ----------
++const TARGET_SCORE = 80;
++const MAX_DELTA_UP = 0.6;
++const MAX_DELTA_DOWN = -3.0;
++const BASE_RECOVERY = 0.18;
++const JITTER = 0.15;
++const COOL_DOWN_MS = 90_000;
++
++const lastStrongEvent = new Map<string, number>();
++export function markStrongEvent(userId: string) {
++  lastStrongEvent.set(userId, Date.now());
++}
++
++export function scoreDelta(t: Telemetry): number {
++  const now = Date.now();
++  const cooldownActive = (now - (lastStrongEvent.get(t.userId) ?? 0)) < COOL_DOWN_MS;
++  let delta = BASE_RECOVERY * (cooldownActive ? 0.35 : 1);
++
++  if (t.speedKph > 170)      delta -= 2.2;
++  else if (t.speedKph > 150) delta -= 1.4;
++  else if (t.speedKph > 130) delta -= 0.8;
++
++  if (t.brake > 4.6) delta -= (t.brake > 5.8 ? 1.6 : 1.0);
++  if (t.accel > 4.6) delta -= (t.accel > 5.8 ? 1.2 : 0.8);
++  if (t.throttle > 90 && t.rpm > 5200 && t.speedKph > 110) delta -= 0.7;
++
++  delta += (Math.random() * 2 - 1) * JITTER;
++  if (delta > MAX_DELTA_UP) delta = MAX_DELTA_UP;
++  if (delta < MAX_DELTA_DOWN) delta = MAX_DELTA_DOWN;
++  return delta;
++}
++
++export function detectRisk(t: Telemetry) {
++  const risks: {
++    userId: string; ts: number;
++    type: 'overSpeed'|'hardBrake'|'hardAccel';
++    lat: number; lng: number; severity: number;
++  }[] = [];
++
++  const gate = (p: number) => Math.random() < p;
++
++  if (t.speedKph > 150 && gate(0.55)) {
++    const sev = (t.speedKph > 170 ? 3.6 : 3.0) + Math.random()*0.8;
++    risks.push({ userId: t.userId, ts: t.ts, type: 'overSpeed', lat: t.lat, lng: t.lng, severity: Math.min(5, Math.max(2, Math.round(sev))) });
++  }
++  if (t.brake > 4.6 && gate(0.5)) {
++    const sev = (t.brake > 5.8 ? 3.6 : 3.0) + Math.random()*0.8;
++    risks.push({ userId: t.userId, ts: t.ts, type: 'hardBrake', lat: t.lat, lng: t.lng, severity: Math.min(5, Math.max(2, Math.round(sev))) });
++  }
++  if (t.accel > 4.6 && gate(0.45)) {
++    const sev = (t.accel > 5.8 ? 2.8 : 2.3) + Math.random()*0.7;
++    risks.push({ userId: t.userId, ts: t.ts, type: 'hardAccel', lat: t.lat, lng: t.lng, severity: Math.min(5, Math.max(1, Math.round(sev))) });
++  }
++
++  if (risks.some(r => r.severity >= 4)) markStrongEvent(t.userId);
++  return risks;
++}
+diff --git a/backend/src/index.ts b/backend/src/index.ts
+index e69de29..5555555 100644
+--- a/backend/src/index.ts
++++ b/backend/src/index.ts
+@@ -1,0 +1,68 @@
++import express from 'express';
++import http from 'http';
++import cors from 'cors';
++import { Server } from 'socket.io';
++import { config } from './config.js';
++import { bus } from './bus.js';
++import { getAllScores } from './store.js';
++import { computeMetrics } from './metrics.js';
++import { addClaim } from './claims.js';
++
++const app = express();
++app.use(cors({ origin: config.corsOrigin || '*' }));
++app.use(express.json());
++
++app.get('/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
++app.get('/scores', (_req, res) => res.json({ items: getAllScores() }));
++app.get('/metrics', (_req, res) => {
++  const m = computeMetrics(getAllScores());
++  res.json({ metrics: m });
++});
++
++// Ruta de test para ver un punto en el mapa al instante
++app.post('/emit-test', (_req, res) => {
++  const event = {
++    userId: 'tester',
++    ts: Date.now(),
++    type: 'overSpeed' as const,
++    lat: -34.6037, lng: -58.3816,
++    severity: 4
++  };
++  bus.emit('risk', event);
++  res.json({ ok: true, event });
++});
++
++const server = http.createServer(app);
++const io = new Server(server, { cors: { origin: config.corsOrigin || '*' } });
++
++io.on('connection', (socket) => {
++  socket.emit('bootstrap', { items: getAllScores() });
++  socket.emit('metrics:update', { metrics: computeMetrics(getAllScores()) });
++});
++
++bus.on('score', (state) => io.emit('score:update', { state }));
++bus.on('risk',  (event) => io.emit('risk:event', { event }));
++
++// refresco de métricas para el front
++setInterval(() => {
++  io.emit('metrics:update', { metrics: computeMetrics(getAllScores()) });
++}, 3000);
++
++server.listen(config.port || 4000, () => {
++  console.log(`Seguface backend running on http://localhost:${config.port || 4000}`);
++});
+diff --git a/backend/src/simulator.ts b/backend/src/simulator.ts
+new file mode 100644
+index 0000000..6666666
+--- /dev/null
++++ b/backend/src/simulator.ts
+@@ -0,0 +1,92 @@
++import { setInterval } from 'node:timers';
++import { upsertScore } from './store.js';
++import { scoreDelta, detectRisk } from './scoring.js';
++import type { Telemetry } from './types.js';
++import { config } from './config.js';
++import { bus } from './bus.js';
++import { addClaim } from './claims.js';
++
++const users = Array.from({ length: config.simulator.users }, (_, i) => `user_${(i+1).toString().padStart(3,'0')}`);
++const pick = <T,>(arr: T[]) => arr[Math.floor(Math.random() * arr.length)];
++
++const CENTER_LAT = -34.6037;
++const CENTER_LNG = -58.3816;
++const jitter = (base: number, maxDelta = 0.02) => base + (Math.random() - 0.5) * maxDelta;
++
++setInterval(() => {
++  const events = 10 + Math.floor(Math.random() * 9); // 10–18 por tick
++  for (let i = 0; i < events; i++) {
++    const userId = pick(users);
++    const demanding = Math.random() < 0.22;
++
++    const baseV = demanding ? 120 + Math.random() * 50 : 55 + Math.random() * 55;
++    const speed = baseV + (Math.random() - 0.5) * 5;
++
++    const hardA = demanding && Math.random() < 0.28;
++    const hardB = demanding && Math.random() < 0.24;
++    const accel = hardA ? 4.7 + Math.random() * 1.3 : Math.abs((Math.random() - 0.5) * 1.4);
++    const brake = hardB ? 4.7 + Math.random() * 1.3 : Math.max(0, Math.random() * 1.0 - Math.random() * 0.5);
++
++    const t: Telemetry = {
++      userId,
++      ts: Date.now(),
++      speedKph: speed,
++      rpm: Math.max(700, Math.min(6800, 900 + speed * 25 + (Math.random() - 0.5) * 700)),
++      throttle: Math.max(0, Math.min(100, demanding ? 80 + Math.random() * 18 : 15 + Math.random() * 55)),
++      accel,
++      brake,
++      lat: jitter(CENTER_LAT, 0.03),
++      lng: jitter(CENTER_LNG, 0.03),
++    };
++
++    const state = upsertScore(userId, scoreDelta(t), t);
++    const lean = { userId: state.userId, score: state.score, lastTs: state.lastTs, events: state.events };
++    JSON.stringify(lean);
++    bus.emit('score', lean);
++
++    const risks = detectRisk(t);
++    for (const r of risks) {
++      JSON.stringify(r);
++      bus.emit('risk', r);
++    }
++
++    // siniestro ocasional
++    if (Math.random() < 0.03) {
++      addClaim({
++        id: `c_${Math.random().toString(36).slice(2, 9)}`,
++        userId,
++        ts: Date.now(),
++        severity: 2 + Math.floor(Math.random() * 4),
++        costUsd: Math.round(800 + Math.random() * 4200),
++        lat: t.lat,
++        lng: t.lng,
++      });
++    }
++  }
++}, config.simulator.emitMs);
++
++console.log(`Simulator ON → ${config.simulator.users} usuarios, ~${config.simulator.emitMs}ms, sensibilidad moderada/estocástica`);
+diff --git a/frontend/src/components/PortfolioCards.tsx b/frontend/src/components/PortfolioCards.tsx
+new file mode 100644
+index 0000000..7777777
+--- /dev/null
++++ b/frontend/src/components/PortfolioCards.tsx
+@@ -0,0 +1,38 @@
++'use client';
++import React from 'react';
++
++type Buckets = { b0_59:number; b60_74:number; b75_89:number; b90_100:number };
++type Metrics = {
++  total:number; active:number; avgScore:number; highRisk:number;
++  buckets:Buckets; claims30d:number; claimRate:number; avgSeverity:number; avgCost:number; expectedLoss:number;
++};
++
++export default function PortfolioCards({ m }: { m: Metrics }){
++  const Card = ({ label, value, hint }:{ label:string; value:string|number; hint?:string }) => (
++    <div className="card p-4">
++      <div className="text-sm text-slate-400">{label}</div>
++      <div className="text-2xl font-bold">{value}</div>
++      {hint && <div className="text-xs text-slate-500 mt-1">{hint}</div>}
++    </div>
++  );
++  return (
++    <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
++      <Card label="Conductores" value={m.total} />
++      <Card label="Activos (5m)" value={m.active} />
++      <Card label="Score prom." value={m.avgScore.toFixed(1)} />
++      <Card label="Riesgo alto (<60)" value={m.highRisk} />
++      <Card label="Siniestros (30d)" value={m.claims30d} hint={`${(m.claimRate*100).toFixed(1)}%`} />
++      <Card label="Pérdida esperada" value={`US$ ${Math.round(m.expectedLoss).toLocaleString()}`} hint={`Sev ${m.avgSeverity.toFixed(1)} • Coste prom. US$ ${Math.round(m.avgCost).toLocaleString()}`} />
++    </section>
++  );
++}
+diff --git a/frontend/src/components/RiskBucketsChart.tsx b/frontend/src/components/RiskBucketsChart.tsx
+new file mode 100644
+index 0000000..8888888
+--- /dev/null
++++ b/frontend/src/components/RiskBucketsChart.tsx
+@@ -0,0 +1,31 @@
++'use client';
++import React, { useMemo } from 'react';
++import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
++
++type Buckets = { b0_59:number; b60_74:number; b75_89:number; b90_100:number };
++
++export default function RiskBucketsChart({ buckets }:{ buckets:Buckets }){
++  const data = useMemo(()=>[
++    { bucket: '0-59', count: buckets.b0_59 },
++    { bucket: '60-74', count: buckets.b60_74 },
++    { bucket: '75-89', count: buckets.b75_89 },
++    { bucket: '90-100', count: buckets.b90_100 },
++  ], [buckets]);
++  return (
++    <div className="card p-4 h-80">
++      <h3 className="text-lg font-semibold mb-2">Distribución por riesgo</h3>
++      <ResponsiveContainer width="100%" height="100%">
++        <BarChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
++          <CartesianGrid strokeDasharray="3 3" opacity={0.2} />
++          <XAxis dataKey="bucket" stroke="#94a3b8"/>
++          <YAxis stroke="#94a3b8"/>
++          <Tooltip />
++          <Bar dataKey="count" />
++        </BarChart>
++      </ResponsiveContainer>
++    </div>
++  );
++}
+diff --git a/frontend/src/app/dashboard/page.tsx b/frontend/src/app/dashboard/page.tsx
+index 9999999..aaaaaaa 100644
+--- a/frontend/src/app/dashboard/page.tsx
++++ b/frontend/src/app/dashboard/page.tsx
+@@ -1,60 +1,132 @@
+-'use client';
+-import React, { useEffect, useRef, useState } from 'react';
+-import io from 'socket.io-client';
+-import ConnectionBadge from '../../components/ConnectionBadge';
+-import KPICards from '../../components/KPICards';
+-import HistogramScores from '../../components/HistogramScores';
+-import TrendChart from '../../components/TrendChart';
+-import RiskMap from '../../components/RiskMap';
+-import AlertsPanel from '../../components/AlertsPanel';
+-import MultiUserChart from '../../components/MultiUserChart';
+-import ScoreTable from '../../components/ScoreTable';
++'use client';
++import React, { useEffect, useRef, useState } from 'react';
++import io from 'socket.io-client';
++import ConnectionBadge from '../../components/ConnectionBadge';
++import KPICards from '../../components/KPICards';
++import PortfolioCards from '../../components/PortfolioCards';
++import RiskBucketsChart from '../../components/RiskBucketsChart';
++import HistogramScores from '../../components/HistogramScores';
++import TrendChart from '../../components/TrendChart';
++import RiskMap from '../../components/RiskMap';
++import AlertsPanel from '../../components/AlertsPanel';
++import MultiUserChart from '../../components/MultiUserChart';
++import ScoreTable from '../../components/ScoreTable';
+ 
+ type Status = 'connected' | 'connecting' | 'disconnected';
+ type Row = { userId: string; score: number; lastTs: number; events: number };
+ type Point = { ts: number; avg: number };
+ type RiskEvt = { userId:string; ts:number; type:'overSpeed'|'hardBrake'|'hardAccel'; lat:number; lng:number; severity:number };
++type Buckets = { b0_59:number; b60_74:number; b75_89:number; b90_100:number };
++type Metrics = {
++  total:number; active:number; avgScore:number; highRisk:number;
++  buckets:Buckets; claims30d:number; claimRate:number; avgSeverity:number; avgCost:number; expectedLoss:number;
++};
+ 
+ const API = process.env.NEXT_PUBLIC_API_BASE || 'http://localhost:4000';
+ const WS  = process.env.NEXT_PUBLIC_WS_URL  || 'http://localhost:4000';
+ 
+ export default function DashboardPage(){
+   const [status, setStatus] = useState<Status>('connecting');
+   const [rows, setRows] = useState<Row[]>([]);
+   const [series, setSeries] = useState<Point[]>([]);
+   const [seriesByUser, setSeriesByUser] = useState<Record<string, { ts:number; score:number }[]>>({});
+   const [events, setEvents] = useState<RiskEvt[]>([]);
++  const [metrics, setMetrics] = useState<Metrics | null>(null);
+   const [limit, setLimit] = useState<number>(25);
+   const buffer = useRef<number[]>([]);
+ 
+   useEffect(()=>{
+     fetch(`${API}/scores`).then(r=>r.json()).then(d=> setRows((d.items||[]) as Row[]));
++    fetch(`${API}/metrics`).then(r=>r.json()).then(d=> setMetrics(d.metrics));
+     const socket = io(WS, { transports: ['websocket'] });
+     socket.on('connect', ()=> setStatus('connected'));
+     socket.on('disconnect', ()=> setStatus('disconnected'));
+     socket.on('connect_error', ()=> setStatus('disconnected'));
+ 
+     socket.on('bootstrap', (p: { items: Row[] })=> setRows(p.items||[]));
+     socket.on('score:update', (msg: { state: Row })=>{
+       setRows(prev => { const m=new Map<string, Row>(prev.map(r=>[r.userId,r])); m.set(msg.state.userId, msg.state); return Array.from(m.values()); });
+       buffer.current.push(msg.state.score);
+       setSeriesByUser(prev => {
+         const next = { ...prev };
+         const arr = (next[msg.state.userId] || []);
+         arr.push({ ts: Date.now(), score: msg.state.score });
+         next[msg.state.userId] = arr.slice(-200);
+         return next;
+       });
+     });
+ 
+     socket.on('risk:event', (payload: { event: RiskEvt })=>{
+       setEvents(prev => [...prev.slice(-499), payload.event]);
+     });
+ 
++    socket.on('metrics:update', (payload: { metrics: Metrics })=>{
++      setMetrics(payload.metrics);
++    });
++
+     const id=setInterval(()=>{
+       if(buffer.current.length){
+         const avg=buffer.current.reduce((a,b)=>a+b,0)/buffer.current.length;
+         buffer.current=[];
+         setSeries(s=>[...s.slice(-200), { ts: Date.now(), avg }]);
+       }
+     },3000);
+ 
+     return ()=>{ clearInterval(id); socket.close(); };
+   },[]);
+ 
+   const now = Date.now();
+   const active = rows.filter(r => now - r.lastTs <= 5*60*1000).length;
+   const avgScore = rows.length ? rows.reduce((a,b)=> a + b.score, 0)/rows.length : 0;
+   const highRisk = rows.filter(r=> r.score < 60).length;
+   const scores = rows.map(r=> r.score);
+ 
+   return (
+     <main className="min-h-screen p-6 md:p-10">
+       <header className="mb-6 flex items-center justify-between">
+         <h1 className="text-2xl md:text-3xl font-bold">Seguface • Insurance Scoring</h1>
+         <div className="flex items-center gap-3">
+           <div className="text-sm text-slate-300 flex items-center gap-2">
+             Mostrar
+             <select value={limit} onChange={(e)=> setLimit(Number(e.target.value))} className="bg-black/40 border border-white/10 rounded px-2 py-1">
+               <option value={10}>10</option>
+               <option value={25}>25</option>
+               <option value={50}>50</option>
+             </select>
+             usuarios
+           </div>
+           <ConnectionBadge status={status} />
+         </div>
+       </header>
+ 
+-      <KPICards total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={events.filter(e=> e.severity>=4).length} />
++      {/* KPIs operativos + KPIs de cartera */}
++      <KPICards total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={events.filter(e=> e.severity>=4).length} />
++      {metrics && <PortfolioCards m={metrics} />}
+ 
+       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
+         <TrendChart series={series} />
+         <HistogramScores scores={scores} />
+-        <AlertsPanel events={events} />
++        {metrics ? <RiskBucketsChart buckets={metrics.buckets} /> : <div className="card p-4 h-80">Cargando…</div>}
+       </section>
+ 
+       <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+         <div className="lg:col-span-2 space-y-4">
+           <MultiUserChart seriesByUser={seriesByUser} limit={limit} />
+           <RiskMap events={events} />
+         </div>
+-        <ScoreTable rows={rows} seriesByUser={seriesByUser} lastRiskByUser={{}} />
++        <ScoreTable rows={rows} seriesByUser={seriesByUser} lastRiskByUser={{}} />
++        <AlertsPanel events={events} />
+       </section>
+     </main>
+   );
+ }
+*** END PATCH ***

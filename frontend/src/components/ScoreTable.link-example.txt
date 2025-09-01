@@ -1,0 +1,6 @@
+/* En tu ScoreTable, para la celda del userId:
+import Link from "next/link";
+<td className="py-1 pr-4 font-mono">
+  <Link className="underline" href={`/dashboard/driver/${r.userId}`}>{r.userId}</Link>
+</td>
+*/

@@ -1,9 +1,9 @@
 ﻿import { setInterval } from "node:timers";
-import { upsertScore } from "./store.js";
-import { scoreDelta, detectRisk } from "./scoring.js";
-import type { Telemetry } from "./types.js";
-import { config } from "./config.js";
-import { bus } from "./bus.js";
+import { upsertScore } from "./store";
+import { scoreDelta, detectRisk } from "./scoring";
+import type { Telemetry } from "./types";
+import { config } from "./config";
+import { bus } from "./bus";
 
 const users = Array.from({ length: config.simulator.users }, (_, i) => `user_${(i + 1).toString().padStart(3, "0")}`);
 
@@ -42,3 +42,5 @@ setInterval(() => {
 }, config.simulator.emitMs);
 
 console.log(`Simulator ON → ${config.simulator.users} usuarios, cada ${config.simulator.emitMs}ms`);
+
+

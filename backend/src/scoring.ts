@@ -1,4 +1,4 @@
-﻿import type { Telemetry } from "./types.js";
+﻿import type { Telemetry } from "./types";
 
 const TARGET_SCORE = 80;
 const MAX_DELTA_UP = 0.6;
@@ -55,3 +55,5 @@ export function detectRisk(t: Telemetry) {
   if (out.some(r => r.severity >= 4)) lastStrongEvent.set(t.userId, Date.now());
   return out;
 }
+
+

@@ -1,4 +1,4 @@
-﻿import type { ScoreState, Telemetry } from "./types.js";
+﻿import type { ScoreState, Telemetry } from "./types";
 
 const states = new Map<string, ScoreState>();
 
@@ -28,3 +28,7 @@ export function toLean(s: ScoreState) {
 function clamp(x: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, x));
 }
+
+
+
+

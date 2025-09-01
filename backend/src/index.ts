@@ -5,10 +5,10 @@ import helmet from "helmet";
 import morgan from "morgan";
 import { Server } from "socket.io";
 import { StatusCodes } from "http-status-codes";
-import { config } from "./config.js";
-import { getTop, toLean, incEvents } from "./store.js";
-import type { LeanState } from "./types.js";
-import { bus } from "./bus.js";
+import { config } from "./config";
+import { getTop, toLean, incEvents } from "./store";
+import type { LeanState } from "./types";
+import { bus } from "./bus";
 
 const app = express();
 const server = http.createServer(app);
@@ -39,3 +39,7 @@ server.listen(config.port, () => {
   console.log(`Seguface backend running on http://localhost:${config.port}`);
   if (config.simulator.enabled) import("./simulator.js");
 });
+
+
+
+

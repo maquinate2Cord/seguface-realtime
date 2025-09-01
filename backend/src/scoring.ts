@@ -1,18 +1,16 @@
 ﻿import type { Telemetry } from "./types";
 
 export type SimConfig = {
-  targetScore: number;     // media deseada (0..100)
-  kPull: number;           // fuerza de reversión a la media (0..1)
-  noiseStd: number;        // desvío estándar del ruido gaussiano
-  maxDeltaUp: number;      // límite de subida por tick
-  maxDeltaDown: number;    // límite de bajada por tick (negativo)
-  coolDownMs: number;      // enfriamiento tras evento fuerte
-  prob: {                  // probabilidades de eventos
-    overSpeed: number;     // 0..1
-    hardBrake: number;     // 0..1
-    hardAccel: number;     // 0..1
-  };
+  targetScore: number;
+  kPull: number;
+  noiseStd: number;
+  maxDeltaUp: number;
+  maxDeltaDown: number;
+  coolDownMs: number;
+  prob: { overSpeed: number; hardBrake: number; hardAccel: number };
 };
+
+type PartialSimConfig = Partial<Omit<SimConfig, "prob">> & { prob?: Partial<SimConfig["prob"]> };
 
 const defaultConfig: SimConfig = {
   targetScore: 75,
@@ -24,13 +22,11 @@ const defaultConfig: SimConfig = {
   prob: { overSpeed: 0.35, hardBrake: 0.30, hardAccel: 0.25 },
 };
 
-export const simConfig: SimConfig = structuredClone
-  ? structuredClone(defaultConfig)
-  : JSON.parse(JSON.stringify(defaultConfig));
+export const simConfig: SimConfig = JSON.parse(JSON.stringify(defaultConfig));
 
 const lastStrongEvent = new Map<string, number>();
-const inCooldown = (userId: string) =>
-  Date.now() - (lastStrongEvent.get(userId) ?? 0) < simConfig.coolDownMs;
+const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
+const inCooldown = (userId: string) => Date.now() - (lastStrongEvent.get(userId) ?? 0) < simConfig.coolDownMs;
 
 function gaussian(mean = 0, std = 1) {
   let u = 0, v = 0;
@@ -38,8 +34,6 @@ function gaussian(mean = 0, std = 1) {
   while (v === 0) v = Math.random();
   return mean + std * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
-
-const clamp = (x: number, a: number, b: number) => Math.min(b, Math.max(a, x));
 
 export function getSimConfig(): SimConfig {
   return JSON.parse(JSON.stringify(simConfig));
@@ -51,7 +45,7 @@ export function resetSimConfig(): SimConfig {
   return getSimConfig();
 }
 
-export function updateSimConfig(patch: Partial<SimConfig>): SimConfig {
+export function updateSimConfig(patch: PartialSimConfig): SimConfig {
   if (patch.targetScore !== undefined) simConfig.targetScore = clamp(patch.targetScore, 0, 100);
   if (patch.kPull !== undefined) simConfig.kPull = clamp(patch.kPull, 0, 1);
   if (patch.noiseStd !== undefined) simConfig.noiseStd = clamp(patch.noiseStd, 0, 5);
@@ -60,15 +54,14 @@ export function updateSimConfig(patch: Partial<SimConfig>): SimConfig {
   if (patch.coolDownMs !== undefined) simConfig.coolDownMs = clamp(patch.coolDownMs, 0, 600_000);
 
   if (patch.prob) {
-    const p = patch.prob;
-    if (p.overSpeed !== undefined) simConfig.prob.overSpeed = clamp(p.overSpeed, 0, 1);
-    if (p.hardBrake !== undefined) simConfig.prob.hardBrake = clamp(p.hardBrake, 0, 1);
-    if (p.hardAccel !== undefined) simConfig.prob.hardAccel = clamp(p.hardAccel, 0, 1);
+    if (patch.prob.overSpeed !== undefined) simConfig.prob.overSpeed = clamp(patch.prob.overSpeed, 0, 1);
+    if (patch.prob.hardBrake !== undefined) simConfig.prob.hardBrake = clamp(patch.prob.hardBrake, 0, 1);
+    if (patch.prob.hardAccel !== undefined) simConfig.prob.hardAccel = clamp(patch.prob.hardAccel, 0, 1);
   }
   return getSimConfig();
 }
 
-// Ahora recibe el score previo (reversión a la media + ruido + penalizaciones)
+// Reversión a la media + ruido + penalizaciones
 export function scoreDelta(prevScore: number, t: Telemetry) {
   let delta = simConfig.kPull * (simConfig.targetScore - prevScore);
   if (inCooldown(t.userId)) delta -= 0.25;
@@ -85,11 +78,7 @@ export function scoreDelta(prevScore: number, t: Telemetry) {
 }
 
 export function detectRisk(t: Telemetry) {
-  const out: {
-    userId: string; ts: number;
-    type: "overSpeed" | "hardBrake" | "hardAccel";
-    lat: number; lng: number; severity: number;
-  }[] = [];
+  const out: { userId: string; ts: number; type: "overSpeed" | "hardBrake" | "hardAccel"; lat: number; lng: number; severity: number }[] = [];
   const gate = (p: number) => Math.random() < p;
 
   if (t.speedKph > 150 && gate(simConfig.prob.overSpeed)) {

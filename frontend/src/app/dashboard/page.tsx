@@ -1,20 +1,19 @@
-﻿"use client";
+"use client";
 import React, { useEffect, useRef, useState } from "react";
 import io from "socket.io-client";
 import dynamic from "next/dynamic";
 
-import ConnectionBadge from "../../components/ConnectionBadge";
-import KPICards from "../../components/KPICards";
-import HistogramScores from "../../components/HistogramScores";
-import TrendChart from "../../components/TrendChart";
-import RiskMap from "../../components/RiskMap";
-import MultiUserChart from "../../components/MultiUserChart";
-import ScoreTable from "../../components/ScoreTable";
-import DriverList from "../../components/DriverList";
+import ConnectionBadge from "@/components/ConnectionBadge";
+import KPICards from "@/components/KPICards";
+import HistogramScores from "@/components/HistogramScores";
+import TrendChart from "@/components/TrendChart";
+import RiskMap from "@/components/RiskMap";
+import MultiUserChart from "@/components/MultiUserChart";
+import ScoreTable from "@/components/ScoreTable";
 
-const SimConfigPanel = dynamic(() => import("../../components/SimConfigPanel"), {
+const SimConfigPanel = dynamic(() => import("@/components/SimConfigPanel"), {
   ssr: false,
-  loading: () => <div className="text-sm text-slate-500">Cargando SimConfig…</div>
+  loading: () => <div className="text-sm text-slate-500">Cargando SimConfig…</div>,
 });
 
 type Status = "connected" | "connecting" | "disconnected";
@@ -23,7 +22,7 @@ type Point = { ts: number; avg: number };
 type RiskEvt = { userId: string; ts: number; type: "overSpeed" | "hardBrake" | "hardAccel"; lat: number; lng: number; severity: number };
 
 type PortfolioMetrics = { totalDrivers: number; activeVehicles: number; avgScore: number; highRisk: number; updatedAt: number };
-type Analytics = { buckets: { name: "High" | "Medium" | "Low"; count: number }[], topRisk: { userId: string; score: number; lastTs: number; events: number }[] };
+type Analytics = { buckets: { name: "High" | "Medium" | "Low"; count: number }[]; topRisk: { userId: string; score: number; lastTs: number; events: number }[] };
 type Claim = { id: string; userId: string; ts: number; type?: string; severity?: number; amountUsd?: number; status?: string; lat?: number; lng?: number; description?: string };
 
 type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim";
@@ -38,10 +37,18 @@ export default function DashboardPage() {
   const buffer = useRef<number[]>([]);
   const [tab, setTab] = useState<Tab>("realtime");
 
+  // Filtros Realtime
+  const [q, setQ] = useState("");
+  const [onlyActive, setOnlyActive] = useState(false);
+  const [minScore, setMinScore] = useState(0);
+  const [sort, setSort] = useState<"scoreAsc" | "scoreDesc" | "eventsDesc">("scoreAsc");
+
+  // Otras solapas (lazy fetch)
   const [portfolio, setPortfolio] = useState<PortfolioMetrics | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [claims, setClaims] = useState<Claim[] | null>(null);
 
+  // Socket bootstrap
   useEffect(() => {
     const socket = io("http://localhost:4000", { transports: ["websocket"] });
     socket.on("connect", () => setStatus("connected"));
@@ -82,22 +89,52 @@ export default function DashboardPage() {
     return () => { clearInterval(id); socket.close(); };
   }, []);
 
+  // Fetch on tab change
   useEffect(() => {
     if (tab === "portfolio") {
-      fetch("http://localhost:4000/metrics").then(r => r.json()).then(j => setPortfolio(j.metrics)).catch(() => setPortfolio(null));
-      fetch("http://localhost:4000/analytics").then(r => r.json()).then(j => setAnalytics(j.analytics)).catch(() => setAnalytics(null));
+      fetch("http://localhost:4000/metrics").then((r) => r.json()).then((j) => setPortfolio(j.metrics)).catch(() => setPortfolio(null));
+      fetch("http://localhost:4000/analytics").then((r) => r.json()).then((j) => setAnalytics(j.analytics)).catch(() => setAnalytics(null));
     }
     if (tab === "claims") {
-      fetch("http://localhost:4000/claims?days=90").then(r => r.json()).then(j => setClaims(j.items)).catch(() => setClaims(null));
+      fetch("http://localhost:4000/claims?days=90").then((r) => r.json()).then((j) => setClaims(j.items)).catch(() => setClaims(null));
     }
   }, [tab]);
 
+  // KPIs globales (no filtrados)
   const now = Date.now();
   const active = rows.filter((r) => now - r.lastTs <= 5 * 60 * 1000).length;
   const avgScore = rows.length ? rows.reduce((a, b) => a + b.score, 0) / rows.length : 0;
   const highRisk = rows.filter((r) => r.score < 60).length;
   const criticalEvents = events.filter((e) => e.severity >= 4 && now - e.ts <= 15 * 60 * 1000).length;
   const scores = rows.map((r) => r.score);
+
+  // ====== Filtros de Realtime ======
+  const filteredRows = React.useMemo(() => {
+    let list = rows;
+    if (q.trim()) {
+      const needle = q.trim().toLowerCase();
+      list = list.filter((r) => r.userId.toLowerCase().includes(needle));
+    }
+    if (onlyActive) list = list.filter((r) => now - r.lastTs <= 5 * 60 * 1000);
+    if (minScore > 0) list = list.filter((r) => r.score >= minScore);
+    switch (sort) {
+      case "scoreAsc": list = [...list].sort((a, b) => a.score - b.score); break;
+      case "scoreDesc": list = [...list].sort((a, b) => b.score - a.score); break;
+      case "eventsDesc": list = [...list].sort((a, b) => b.events - a.events); break;
+    }
+    return list;
+  }, [rows, q, onlyActive, minScore, sort, now]);
+
+  const filteredUserIds = React.useMemo(() => new Set(filteredRows.map(r => r.userId)), [filteredRows]);
+  const seriesByUserFiltered = React.useMemo(() => {
+    const out: Record<string, { ts: number; score: number }[]> = {};
+    for (const uid of Object.keys(seriesByUser)) {
+      if (filteredUserIds.has(uid)) out[uid] = seriesByUser[uid];
+    }
+    return out;
+  }, [seriesByUser, filteredUserIds]);
+
+  const eventsFiltered = React.useMemo(() => events.filter(e => filteredUserIds.has(e.userId)), [events, filteredUserIds]);
 
   return (
     <main className="min-h-screen p-6 md:p-10">
@@ -119,25 +156,57 @@ export default function DashboardPage() {
         ))}
       </nav>
 
-      {/* Realtime */}
+      {/* ====== REALTIME ====== */}
       {tab === "realtime" && (
         <>
           <KPICards total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
+
+          {/* Controles de filtro/busqueda */}
+          <section className="mt-4 mb-4 p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
+            <div className="flex flex-wrap items-center gap-3">
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Buscar conductor (user_001)…"
+                className="px-3 py-2 rounded-lg border border-slate-300"
+              />
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={onlyActive} onChange={(e) => setOnlyActive(e.target.checked)} />
+                Solo activos (5m)
+              </label>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-slate-500">Score ≥ {minScore}</span>
+                <input type="range" min={0} max={100} step={1} value={minScore} onChange={(e) => setMinScore(Number(e.target.value))} />
+              </div>
+              <select value={sort} onChange={(e) => setSort(e.target.value as any)} className="px-3 py-2 rounded-lg border border-slate-300">
+                <option value="scoreAsc">Score ↑</option>
+                <option value="scoreDesc">Score ↓</option>
+                <option value="eventsDesc">Eventos ↓</option>
+              </select>
+              <div className="ml-auto text-xs text-slate-500">
+                {filteredRows.length} / {rows.length} conductores
+              </div>
+            </div>
+          </section>
+
+          {/* Gráficos globales (no filtrados) */}
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
             <div className="lg:col-span-2"><TrendChart series={series} /></div>
             <HistogramScores scores={scores} />
           </section>
+
+          {/* Sección filtrada: MultiUser + Mapa + Tabla */}
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 space-y-4">
-              <MultiUserChart seriesByUser={seriesByUser} limit={8} />
-              <RiskMap events={events} />
+              <MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} />
+              <RiskMap events={eventsFiltered} />
             </div>
-            <ScoreTable rows={rows} seriesByUser={seriesByUser} lastRiskByUser={lastRiskByUser.current} />
+            <ScoreTable rows={filteredRows} seriesByUser={seriesByUserFiltered} lastRiskByUser={lastRiskByUser.current} />
           </section>
         </>
       )}
 
-      {/* Portfolio */}
+      {/* ====== PORTFOLIO ====== */}
       {tab === "portfolio" && (
         <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-3">
@@ -160,21 +229,23 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {/* Claims */}
+      {/* ====== CLAIMS ====== */}
       {tab === "claims" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
           {claims ? <div><strong>Claims</strong><pre className="text-xs mt-2">{JSON.stringify(claims, null, 2)}</pre></div> : <div className="text-sm text-slate-500">Cargando claims…</div>}
         </section>
       )}
 
-      {/* Drivers */}
+      {/* ====== DRIVERS ====== */}
       {tab === "drivers" && (
-  <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-    <DriverList rows={rows} />
-  </section>
-)}
+        <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
+          <div className="text-sm text-slate-500">
+            Usá la solapa <strong>Realtime</strong> para buscar/filtrar conductores y entrá al detalle desde la tabla.
+          </div>
+        </section>
+      )}
 
-      {/* Sim */}
+      {/* ====== SIM ====== */}
       {tab === "sim" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
           <SimConfigPanel />
@@ -183,4 +254,3 @@ export default function DashboardPage() {
     </main>
   );
 }
-

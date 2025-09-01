@@ -39,6 +39,9 @@ type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
 import FilterBarPro from "@/components/FilterBarPro";
 import WidgetCard from "@/components/WidgetCard";
 import TimeRangeChips, { type RangeKey } from "@/components/TimeRangeChips";
+import Section from "@/components/Section";
+import MetricTilesV2 from "@/components/MetricTilesV2";
+import UXToolbar, { type RangeKey } from "@/components/UXToolbar";
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [rows, setRows] = useState<Row[]>([]);
@@ -48,6 +51,7 @@ export default function DashboardPage() {
   const lastRiskByUser = useRef<Record<string, RiskEvt | undefined>>({});
   const buffer = useRef<number[]>([]);
   const [tab, setTab] = useState<Tab>("realtime");
+  const [range, setRange] = useState<"15m"|"1h"|"24h">("1h");
 
   // Filtros Realtime
   const [q, setQ] = useState("");
@@ -211,20 +215,10 @@ export default function DashboardPage() {
       {tab === "realtime" && (
   <>
     {/* KPIs ejecutivos */}
-    <EnhancedKPIs total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
+    <MetricTilesV2 total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
 
     {/* Filtros + Export */}
-    <FilterBarPro
-      q={q}
-      onQ={setQ}
-      onlyActive={onlyActive}
-      onOnlyActive={setOnlyActive}
-      minScore={minScore}
-      onMinScore={setMinScore}
-      sort={sort}
-      onSort={setSort}
-      onExport={exportCsv}
-    />
+    
 
     {/* Grid analítico (12 columnas) */}
     <div className="grid grid-cols-12 gap-4 mt-4">

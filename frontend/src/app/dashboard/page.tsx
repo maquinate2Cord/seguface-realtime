@@ -34,15 +34,6 @@ type PortfolioMetrics = { totalDrivers: number; activeVehicles: number; avgScore
 type Analytics = { buckets: { name: "High" | "Medium" | "Low"; count: number }[]; topRisk: { userId: string; score: number; lastTs: number; events: number }[] };
 
 type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
-
-
-import FilterBarPro from "@/components/FilterBarPro";
-import WidgetCard from "@/components/WidgetCard";
-import TimeRangeChips, from pimport Section from "@/components/Section";
-import MetricTilesV2 from "@/components/MetricTilesV2";
-import UXToolbar, from pimport Panel from "@/components/Panel";
-import StatRibbon from "@/components/StatRibbon";
-import ToolbarProV3, from pimport PageHeaderPro from "@/components/PageHeaderPro";
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [rows, setRows] = useState<Row[]>([]);
@@ -52,8 +43,6 @@ export default function DashboardPage() {
   const lastRiskByUser = useRef<Record<string, RiskEvt | undefined>>({});
   const buffer = useRef<number[]>([]);
   const [tab, setTab] = useState<Tab>("realtime");
-  const [range, setRange] = useState<"15m"|"1h"|"24h">("1h");
-
   // Filtros Realtime
   const [q, setQ] = useState("");
   const [onlyActive, setOnlyActive] = useState(false);
@@ -215,66 +204,70 @@ export default function DashboardPage() {
       {/* REALTIME */}
       {tab === "realtime" && (
   <>
-    <PageHeaderPro title="Realtime • Flota" status={"Conectado"} />
-
     <div className="grid grid-cols-12 gap-5">
-      {/* Rail izquierdo: resumen + filtros */}
+      {/* Rail izquierdo: KPIs ejecutivos */}
       <aside className="col-span-12 lg:col-span-3 space-y-4">
-        <Panel title="Resumen ejecutivo">
-          <StatRibbon
-            total={rows.length}
-            active={active}
-            avgScore={avgScore}
-            highRisk={highRisk}
-            criticalEvents={criticalEvents}
-          />
-        </Panel>
-        <Panel title="Filtros">
-          <ToolbarProV3
-            q={q}
-            onQ={setQ}
-            onlyActive={onlyActive}
-            onOnlyActive={setOnlyActive}
-            minScore={minScore}
-            onMinScore={setMinScore}
-            sort={sort}
-            onSort={setSort}
-            range={range as any}
-            onRangeChange={setRange as any}
-            onExport={exportCsv}
-          />
-        </Panel>
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="text-xs font-semibold text-slate-500 mb-2">Resumen</div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="text-[11px] uppercase text-slate-500">Conductores</div>
+              <div className="text-2xl font-semibold tabular-nums">{rows.length}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="text-[11px] uppercase text-slate-500">Activos (5m)</div>
+              <div className="text-2xl font-semibold tabular-nums">{active}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3 col-span-2">
+              <div className="text-[11px] uppercase text-slate-500">Score promedio</div>
+              <div className="text-2xl font-semibold tabular-nums">{Number.isFinite(avgScore) ? avgScore.toFixed(1) : "—"}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="text-[11px] uppercase text-slate-500">Riesgo alto (&lt;60)</div>
+              <div className="text-2xl font-semibold tabular-nums">{highRisk}</div>
+            </div>
+            <div className="rounded-xl border border-slate-200 p-3">
+              <div className="text-[11px] uppercase text-slate-500">Eventos críticos</div>
+              <div className="text-2xl font-semibold tabular-nums">{criticalEvents}</div>
+            </div>
+          </div>
+        </div>
       </aside>
 
       {/* Área principal */}
       <section className="col-span-12 lg:col-span-9 space-y-4">
-        <Panel title="Tendencia (pulso global)" subtitle="Score promedio vs. tiempo">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="text-sm font-semibold text-slate-800 mb-2">Tendencia (pulso global)</div>
           <div className="h-80"><TrendChart series={series} /></div>
-        </Panel>
-
-        <div className="grid grid-cols-12 gap-4">
-          <Panel className="col-span-12 lg:col-span-5" title="Distribución de scores" subtitle="Última ventana">
-            <div className="h-72"><HistogramScores scores={scores} /></div>
-          </Panel>
-          <Panel className="col-span-12 lg:col-span-7" title="Series por usuario (filtrado)" subtitle="Top N por actividad">
-            <div className="h-72"><MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} /></div>
-          </Panel>
         </div>
 
-        <Panel title="Mapa de eventos de riesgo (filtrados)" subtitle="Ubicación y severidad">
+        <div className="grid grid-cols-12 gap-4">
+          <div className="col-span-12 lg:col-span-5 rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="text-sm font-semibold text-slate-800 mb-2">Distribución de scores</div>
+            <div className="h-72"><HistogramScores scores={scores} /></div>
+          </div>
+          <div className="col-span-12 lg:col-span-7 rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="text-sm font-semibold text-slate-800 mb-2">Series por usuario (filtrado)</div>
+            <div className="h-72"><MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} /></div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="text-sm font-semibold text-slate-800 mb-2">Mapa de eventos de riesgo (filtrados)</div>
           <div className="h-80"><RiskMap events={eventsFiltered} /></div>
-        </Panel>
+        </div>
       </section>
 
       {/* Operación: tabla completa */}
       <div className="col-span-12">
-        <Panel title="Detalle operativo (filtrado)" subtitle="Abrí un conductor para ver su ficha">
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <div className="text-sm font-semibold text-slate-800 mb-2">Detalle operativo (filtrado)</div>
           <ScoreTable
             rows={filteredRows}
             seriesByUser={seriesByUserFiltered}
             lastRiskByUser={lastRiskByUser.current}
           />
-        </Panel>
+        </div>
       </div>
     </div>
   </>

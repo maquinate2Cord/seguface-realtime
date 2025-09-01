@@ -1,34 +1,38 @@
 "use client";
-import React, { useMemo } from "react";
+import React from "react";
+import Link from "next/link";
 
-type Row = { userId:string; score:number; lastTs:number; events:number };
+type Row = { userId:string; score:number; events:number; lastTs:number };
 
-export default function TopRiskTable({ rows, limit=10 }:{ rows: Row[]; limit?: number }){
-  const data = useMemo(()=> {
-    const sorted = [...rows].sort((a,b)=> a.score - b.score);
-    return sorted.slice(0, limit);
-  }, [rows, limit]);
+export default function TopRiskTable({ rows, limit=10 }:{ rows: Row[]; limit?: number }) {
+  const sorted = [...rows].sort((a,b)=>{
+    const sa = a.score ?? 0, sb = b.score ?? 0;
+    if (sa !== sb) return sa - sb;              // primero peor score
+    return (b.events ?? 0) - (a.events ?? 0);   // luego más eventos
+  }).slice(0, limit);
 
   return (
-    <div className="card p-4">
-      <h3 className="text-lg font-semibold mb-2">Top {limit} • Conductores de mayor riesgo</h3>
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-sm font-semibold mb-2">Top riesgos (score bajo)</div>
       <div className="overflow-auto">
         <table className="min-w-full text-sm">
-          <thead className="text-slate-400">
+          <thead className="text-left text-slate-500">
             <tr>
-              <th className="text-left py-1 pr-4">User</th>
-              <th className="text-right py-1 pr-4">Score</th>
-              <th className="text-right py-1 pr-4">Eventos</th>
-              <th className="text-right py-1">Últ. actividad</th>
+              <th className="py-2 pr-3">Conductor</th>
+              <th className="py-2 pr-3">Score</th>
+              <th className="py-2 pr-3">Eventos</th>
+              <th className="py-2 pr-3">Detalle</th>
             </tr>
           </thead>
           <tbody>
-            {data.map(r=>(
-              <tr key={r.userId} className="border-t border-white/10">
-                <td className="py-1 pr-4 font-mono">{r.userId}</td>
-                <td className="py-1 pr-4 text-right">{r.score.toFixed(1)}</td>
-                <td className="py-1 pr-4 text-right">{r.events}</td>
-                <td className="py-1 text-right">{new Date(r.lastTs).toLocaleTimeString()}</td>
+            {sorted.map(r=>(
+              <tr key={r.userId} className="border-t border-slate-100">
+                <td className="py-2 pr-3 font-mono">{r.userId}</td>
+                <td className="py-2 pr-3">{(r.score ?? 0).toFixed(1)}</td>
+                <td className="py-2 pr-3">{r.events ?? 0}</td>
+                <td className="py-2 pr-3">
+                  <Link href={`/dashboard/driver/${r.userId}`} className="text-slate-900 underline">Abrir ficha</Link>
+                </td>
               </tr>
             ))}
           </tbody>

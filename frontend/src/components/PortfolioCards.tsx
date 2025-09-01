@@ -1,28 +1,31 @@
 "use client";
 import React from "react";
 
-type Buckets = { b0_59:number; b60_74:number; b75_89:number; b90_100:number };
-type Metrics = {
-  total:number; active:number; avgScore:number; highRisk:number;
-  buckets:Buckets; claims30d:number; claimRate:number; avgSeverity:number; avgCost:number; expectedLoss:number;
-};
-
-export default function PortfolioCards({ m }: { m: Metrics }){
-  const Card = ({ label, value, hint }:{ label:string; value:string|number; hint?:string }) => (
-    <div className="card p-4">
-      <div className="text-sm text-slate-400">{label}</div>
-      <div className="text-2xl font-bold">{value}</div>
-      {hint && <div className="text-xs text-slate-500 mt-1">{hint}</div>}
+export default function PortfolioCards({
+  exposure, claims, freq, severity, pure, lr
+}:{
+  exposure: number;  // # conductores (proxy de exposición)
+  claims: number;    // # siniestros
+  freq: number;      // siniestros / exposición (por conductor)
+  severity: number;  // monto medio
+  pure: number;      // prima pura (freq * severity)
+  lr: number;        // proxy de LR (si no hay primas)
+}) {
+  const Item = ({label, value, hint}:{label:string; value:string; hint?:string}) => (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-[11px] uppercase tracking-wide text-slate-500">{label}</div>
+      <div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>
+      {hint ? <div className="text-xs text-slate-400 mt-1">{hint}</div> : null}
     </div>
   );
   return (
-    <section className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-4">
-      <Card label="Conductores" value={m.total} />
-      <Card label="Activos (5m)" value={m.active} />
-      <Card label="Score prom." value={m.avgScore.toFixed(1)} />
-      <Card label="Riesgo alto (<60)" value={m.highRisk} />
-      <Card label="Siniestros (30d)" value={m.claims30d} hint={`${(m.claimRate*100).toFixed(1)}%`} />
-      <Card label="Pérdida esperada" value={`US$ ${Math.round(m.expectedLoss).toLocaleString()}`} hint={`Sev ${m.avgSeverity.toFixed(1)} • Coste prom. US$ ${Math.round(m.avgCost).toLocaleString()}`} />
-    </section>
+    <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+      <Item label="Exposición" value={exposure.toLocaleString()} hint="Conductores" />
+      <Item label="Siniestros" value={claims.toLocaleString()} />
+      <Item label="Frecuencia" value={(freq*100).toFixed(2) + " %"} hint="Siniestros / conductor" />
+      <Item label="Severidad" value={"$ " + Math.round(severity).toLocaleString()} />
+      <Item label="Prima pura" value={"$ " + Math.round(pure).toLocaleString()} hint="freq × severity" />
+      <Item label="LR (proxy)" value={(lr*100).toFixed(1) + " %"} hint="Sin primas: se muestra proxy" />
+    </div>
   );
 }

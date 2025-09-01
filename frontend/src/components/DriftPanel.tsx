@@ -1,52 +1,48 @@
 "use client";
-import React, { useState } from "react";
+import React from "react";
 
 export default function DriftPanel({
-  psi, ks, bins, base, cur, onReset
-}: {
-  psi: number; ks: number; bins: number[]; base: number[]; cur: number[];
-  onReset?: ()=>void;
-}) {
-  const status = psi > 0.5 || ks > 0.3 ? "alert" : psi > 0.25 || ks > 0.2 ? "warn" : "ok";
-  const color = status==="alert" ? "bg-rose-100 border-rose-300" : status==="warn" ? "bg-amber-50 border-amber-200" : "bg-emerald-50 border-emerald-200";
-  const [busy, setBusy] = useState(false);
-
-  const reset = async ()=> {
-    if (!onReset) return;
-    setBusy(true);
-    try { await onReset(); } finally { setBusy(false); }
-  };
-
+  base, curr, labels
+}:{ base:number[]; curr:number[]; labels:string[] }) {
+  const sum = (a:number[]) => a.reduce((s,v)=>s+v,0);
+  const sb = Math.max(1e-9, sum(base));
+  const sc = Math.max(1e-9, sum(curr));
+  const rows = labels.map((lab,i)=>{
+    const pb = base[i]/sb, pc = curr[i]/sc;
+    const contrib = (pc - pb) * Math.log((pc + 1e-12)/(pb + 1e-12));
+    return { label: lab, pb, pc, contrib };
+  });
+  const psi = rows.reduce((s,r)=>s+r.contrib,0);
   return (
-    <div className={`p-4 rounded-xl border ${color}`}>
-      <div className="mb-2 flex items-center justify-between">
-        <div className="font-semibold">Drift de Score (PSI/KS)</div>
-        <button onClick={reset} disabled={busy} className="px-2 py-1 text-sm rounded-md border border-slate-300 bg-white hover:bg-slate-50">
-          {busy ? "Reseteando…" : "Reset baseline"}
-        </button>
-      </div>
-      <div className="text-sm mb-3">PSI: <b>{psi.toFixed(3)}</b> · KS: <b>{ks.toFixed(3)}</b></div>
-      <div className="space-y-1">
-        {base.map((b,i)=>{
-          const curv = cur[i] ?? 0;
-          const max = Math.max(0.001, Math.max(b, curv));
-          const w1 = (b/max)*100, w2 = (curv/max)*100;
-          const label = `${bins[i].toFixed(0)}–${bins[i+1].toFixed(0)}`;
-          return (
-            <div key={i} className="flex items-center gap-2">
-              <div className="w-16 text-[11px] text-slate-500">{label}</div>
-              <div className="flex-1">
-                <div className="h-3 rounded bg-slate-100 relative overflow-hidden mb-0.5">
-                  <div className="h-3 bg-slate-300/70" style={{ width: w1+"%" }} title={`baseline ~ ${(b*100).toFixed(2)}%`} />
-                </div>
-                <div className="h-3 rounded bg-slate-100 relative overflow-hidden">
-                  <div className="h-3" style={{ width: w2+"%", background: "linear-gradient(90deg, rgba(59,130,246,0.3), rgba(59,130,246,0.6))" }} title={`actual ~ ${(curv*100).toFixed(2)}%`} />
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
+    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="text-sm font-semibold mb-2">Drift (PSI)</div>
+      <table className="w-full text-sm">
+        <thead className="text-left text-slate-500">
+          <tr>
+            <th className="py-2">Bucket</th>
+            <th className="py-2">Base %</th>
+            <th className="py-2">Actual %</th>
+            <th className="py-2">Contrib.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r,i)=>(
+            <tr key={i} className="border-t border-slate-100">
+              <td className="py-1">{r.label}</td>
+              <td className="py-1">{(r.pb*100).toFixed(2)}%</td>
+              <td className="py-1">{(r.pc*100).toFixed(2)}%</td>
+              <td className="py-1">{r.contrib.toFixed(4)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot className="border-t border-slate-200">
+          <tr>
+            <td className="py-2 font-semibold" colSpan={3}>PSI total</td>
+            <td className="py-2 font-semibold">{psi.toFixed(4)}</td>
+          </tr>
+        </tfoot>
+      </table>
+      <div className="text-xs text-slate-500 mt-2">Guía: &lt;0.1 estable · 0.1–0.25 leve · &gt;0.25 relevante</div>
     </div>
   );
 }

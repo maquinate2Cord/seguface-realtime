@@ -10,6 +10,7 @@ import TrendChart from "../../components/TrendChart";
 import RiskMap from "../../components/RiskMap";
 import MultiUserChart from "../../components/MultiUserChart";
 import ScoreTable from "../../components/ScoreTable";
+import DriverList from "../../components/DriverList";
 
 const SimConfigPanel = dynamic(() => import("../../components/SimConfigPanel"), {
   ssr: false,
@@ -168,12 +169,10 @@ export default function DashboardPage() {
 
       {/* Drivers */}
       {tab === "drivers" && (
-        <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-          <div className="text-sm text-slate-500">
-            Explorar detalle por conductor en <code>/dashboard/driver/[id]</code>. Agregá enlaces desde ScoreTable si querés deep-link.
-          </div>
-        </section>
-      )}
+  <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
+    <DriverList rows={rows} />
+  </section>
+)}
 
       {/* Sim */}
       {tab === "sim" && (
@@ -184,3 +183,4 @@ export default function DashboardPage() {
     </main>
   );
 }
+

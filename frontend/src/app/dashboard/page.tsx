@@ -182,7 +182,7 @@ export default function DashboardPage() {
       {/* Claims */}
       {tab === "claims" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-          {claims ? <ClaimsPanel items={claims as any} /> : <div className="text-sm text-slate-500">Cargando claims…</div>}
+          {claims ? <ClaimsPanel claims={claims as any} /> : <div className="text-sm text-slate-500">Cargando claims…</div>}
         </section>
       )}
 
@@ -197,3 +197,4 @@ export default function DashboardPage() {
     </main>
   );
 }
+

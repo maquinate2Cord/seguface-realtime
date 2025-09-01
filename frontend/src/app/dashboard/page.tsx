@@ -21,6 +21,8 @@ const ReasonCodesPanel = dynamic(() => import("../../components/ReasonCodesPanel
 const DriftPanel     = dynamic(() => import("../../components/DriftPanel").then(m => m.default).catch(() => Promise.resolve(Safe("DriftPanel no disponible"))), { ssr: false });
 const CalibrationChart = dynamic(() => import("../../components/CalibrationChart").then(m => m.default).catch(() => Promise.resolve(Safe("CalibrationChart no disponible"))), { ssr: false });
 
+
+const SimConfigPanel = dynamic(() => import("../../components/SimConfigPanel").then(m => m.default).catch(() => Promise.resolve(Safe("SimConfigPanel no disponible"))), { ssr: false });
 type Status = "connected" | "connecting" | "disconnected";
 type Row = { userId: string; score: number; lastTs: number; events: number };
 type Point = { ts: number; avg: number };
@@ -193,8 +195,10 @@ export default function DashboardPage() {
             Explorar detalle por conductor en <code>/dashboard/driver/[id]</code>. Agregá enlaces desde ScoreTable si querés deep-link.
           </div>
         </section>
+      )}      {/* Sim */}
+      {tab === "sim" && (
+        <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
+          <SimConfigPanel />
+        </section>
       )}
-    </main>
-  );
-}
-
+  

@@ -38,13 +38,11 @@ type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
 
 import FilterBarPro from "@/components/FilterBarPro";
 import WidgetCard from "@/components/WidgetCard";
-import TimeRangeChips, { type RangeKey } from "@/components/TimeRangeChips";
-import Section from "@/components/Section";
+import TimeRangeChips, from pimport Section from "@/components/Section";
 import MetricTilesV2 from "@/components/MetricTilesV2";
-import UXToolbar, { type RangeKey } from "@/components/UXToolbar";
-import Panel from "@/components/Panel";
+import UXToolbar, from pimport Panel from "@/components/Panel";
 import StatRibbon from "@/components/StatRibbon";
-import ToolbarProV3, { type RangeKey } from "@/components/ToolbarProV3";
+import ToolbarProV3, from pimport PageHeaderPro from "@/components/PageHeaderPro";
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [rows, setRows] = useState<Row[]>([]);

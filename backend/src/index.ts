@@ -1,4 +1,4 @@
-﻿import express from "express";
+import express from "express";
 import http from "http";
 import cors from "cors";
 import helmet from "helmet";
@@ -16,6 +16,11 @@ import { computePortfolioMetrics } from "./metrics";
 import { portfolioAnalytics } from "./analytics";
 import { addClaim, getAllClaims, getRecentClaims } from "./claims";
 import { getSimConfig, updateSimConfig, resetSimConfig } from "./scoring";
+
+import { addRiskEvent } from "./events_store";
+import { computePercentiles, eventsHeatmap } from "./analytics2";
+import { qualityMetrics } from "./quality";
+import { pushAlert, getRecentAlerts, ackAlert } from "./alerts";
 
 const app = express();
 const server = http.createServer(app);
@@ -40,6 +45,25 @@ app.get("/metrics", (_req, res) => {
 app.get("/analytics", (_req, res) => {
   const scores = getTop(500);
   res.json({ analytics: portfolioAnalytics(scores) });
+});
+
+/** Portfolio - Percentiles (sobre snapshot actual) */
+app.get("/portfolio/percentiles", (_req, res) => {
+  const values = getTop(1000).map((s) => s.score);
+  const pct = computePercentiles(values);
+  res.json({ percentiles: pct });
+});
+
+/** Events Heatmap (7x24) */
+app.get("/events/heatmap", (req, res) => {
+  const days = Math.max(1, Math.min(30, Number(req.query.days ?? 7)));
+  res.json({ matrix: eventsHeatmap(days) });
+});
+
+/** Quality metrics (ventana reciente) */
+app.get("/quality/metrics", (req, res) => {
+  const minutes = Math.max(1, Math.min(360, Number(req.query.minutes ?? 60)));
+  res.json({ quality: qualityMetrics(minutes) });
 });
 
 /** Claims */
@@ -99,17 +123,32 @@ app.post("/sim-config/reset", (_req, res) => {
   return res.json({ config: cfg });
 });
 
+/** Alerts (sev >= 4) */
+app.get("/alerts/recent", (req, res) => {
+  const minutes = Math.max(1, Math.min(120, Number(req.query.minutes ?? 15)));
+  res.json({ items: getRecentAlerts(minutes) });
+});
+
+app.post("/alerts/ack", (req, res) => {
+  const id = String(req.body?.id ?? "");
+  if (!id) return res.status(StatusCodes.BAD_REQUEST).json({ ok: false, error: "missing id" });
+  const ok = ackAlert(id);
+  return res.json({ ok });
+});
+
 /** Socket.IO bootstrap + streams */
 io.on("connection", (socket) => {
   socket.emit("bootstrap", { items: getTop(200).map(toLean) });
 });
 
-// bridge bus → io
+// bridge bus → io (+ almacenar eventos y alertas)
 bus.on("score", (lean: LeanState) => {
   io.emit("score:update", { type: "score:update", state: lean });
 });
-bus.on("risk", (evt: { userId: string; ts: number; type: string; lat: number; lng: number; severity: number }) => {
+bus.on("risk", (evt: { userId: string; ts: number; type: "overSpeed" | "hardBrake" | "hardAccel"; lat: number; lng: number; severity: number }) => {
   incEvents(evt.userId);
+  addRiskEvent(evt);
+  if (evt.severity >= 4) pushAlert(evt);
   io.emit("risk:event", { event: evt });
 });
 

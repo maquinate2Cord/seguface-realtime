@@ -4,7 +4,7 @@ import io from "socket.io-client";
 import dynamic from "next/dynamic";
 
 import ConnectionBadge from "@/components/ConnectionBadge";
-import KPICards from "@/components/KPICards";
+import EnhancedKPIs from "@/components/EnhancedKPIs";
 import HistogramScores from "@/components/HistogramScores";
 import TrendChart from "@/components/TrendChart";
 import RiskMap from "@/components/RiskMap";
@@ -206,30 +206,20 @@ export default function DashboardPage() {
       {/* REALTIME */}
       {tab === "realtime" && (
         <>
-          <KPICards total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
+          <EnhancedKPIs total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
 
           {/* Filtros + Export */}
-          <section className="mt-4 mb-4 p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-            <div className="flex flex-wrap items-center gap-3">
-              <input value={q} onChange={(e)=>setQ(e.target.value)} placeholder="Buscar conductor (user_001)…" className="px-3 py-2 rounded-lg border border-slate-300" />
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={onlyActive} onChange={(e)=>setOnlyActive(e.target.checked)} /> Solo activos (5m)
-              </label>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-slate-500">Score ≥ {minScore}</span>
-                <input type="range" min={0} max={100} step={1} value={minScore} onChange={(e)=>setMinScore(Number(e.target.value))} />
-              </div>
-              <select value={sort} onChange={(e)=>setSort(e.target.value as any)} className="px-3 py-2 rounded-lg border border-slate-300">
-                <option value="scoreAsc">Score ↑</option>
-                <option value="scoreDesc">Score ↓</option>
-                <option value="eventsDesc">Eventos ↓</option>
-              </select>
-              <div className="ml-auto flex items-center gap-3">
-                <div className="text-xs text-slate-500">{filteredRows.length} / {rows.length} conductores</div>
-                <button onClick={exportCsv} className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 text-sm">Export CSV</button>
-              </div>
-            </div>
-          </section>
+          <ProFilterBar
+  q={q}
+  onQ={setQ}
+  onlyActive={onlyActive}
+  onOnlyActive={setOnlyActive}
+  minScore={minScore}
+  onMinScore={setMinScore}
+  sort={sort}
+  onSort={setSort}
+  onExport={exportCsv}
+/>
 
           {/* Calidad + Alertas */}
           <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">

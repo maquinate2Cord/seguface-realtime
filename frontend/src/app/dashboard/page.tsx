@@ -42,6 +42,9 @@ import TimeRangeChips, { type RangeKey } from "@/components/TimeRangeChips";
 import Section from "@/components/Section";
 import MetricTilesV2 from "@/components/MetricTilesV2";
 import UXToolbar, { type RangeKey } from "@/components/UXToolbar";
+import Panel from "@/components/Panel";
+import StatRibbon from "@/components/StatRibbon";
+import ToolbarProV3, { type RangeKey } from "@/components/ToolbarProV3";
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [rows, setRows] = useState<Row[]>([]);
@@ -214,55 +217,72 @@ export default function DashboardPage() {
       {/* REALTIME */}
       {tab === "realtime" && (
   <>
-    {/* KPIs ejecutivos */}
-    <MetricTilesV2 total={rows.length} active={active} avgScore={avgScore} highRisk={highRisk} criticalEvents={criticalEvents} />
+    {/* 1) Ribbon ejecutivo */}
+    <StatRibbon
+      total={rows.length}
+      active={active}
+      avgScore={avgScore}
+      highRisk={highRisk}
+      criticalEvents={criticalEvents}
+    />
 
-    {/* Filtros + Export */}
-    
+    {/* 2) Toolbar de filtros */}
+    <ToolbarProV3
+      q={q}
+      onQ={setQ}
+      onlyActive={onlyActive}
+      onOnlyActive={setOnlyActive}
+      minScore={minScore}
+      onMinScore={setMinScore}
+      sort={sort}
+      onSort={setSort}
+      range={range as any}
+      onRangeChange={setRange as any}
+      onExport={exportCsv}
+    />
 
-    {/* Grid analítico (12 columnas) */}
+    {/* 3) Monitoreo */}
     <div className="grid grid-cols-12 gap-4 mt-4">
-      {/* Pulso global */}
-      <div className="col-span-12 lg:col-span-7">
-        <WidgetCard title="Tendencia (pulso global)" right={<TimeRangeChips value={range} onChange={setRange as any} />}>
-          <div className="h-64">
+      <div className="col-span-12 lg:col-span-8">
+        <Panel title="Tendencia (pulso global)" subtitle="Score promedio vs. tiempo">
+          <div className="h-72">
             <TrendChart series={series} />
           </div>
-        </WidgetCard>
+        </Panel>
       </div>
-
-      {/* Distribución */}
-      <div className="col-span-12 lg:col-span-5">
-        <WidgetCard title="Distribución de scores">
-          <div className="h-64">
+      <div className="col-span-12 lg:col-span-4">
+        <Panel title="Distribución de scores" subtitle="Histograma de la última ventana">
+          <div className="h-72">
             <HistogramScores scores={scores} />
           </div>
-        </WidgetCard>
+        </Panel>
       </div>
 
-      {/* Multiusuario (filtrado) */}
+      {/* 4) Análisis */}
       <div className="col-span-12 lg:col-span-7">
-        <WidgetCard title="Series por conductor (filtrado)">
-          <div className="h-72">
+        <Panel title="Series por usuario (filtrado)" subtitle="Top N por actividad reciente">
+          <div className="h-80">
             <MultiUserChart seriesByUser={seriesByUserFiltered} limit={8} />
           </div>
-        </WidgetCard>
+        </Panel>
       </div>
-
-      {/* Mapa (filtrado) */}
       <div className="col-span-12 lg:col-span-5">
-        <WidgetCard title="Eventos de riesgo (filtrados)">
-          <div className="h-72">
+        <Panel title="Eventos de riesgo (filtrados)" subtitle="Ubicación y severidad">
+          <div className="h-80">
             <RiskMap events={eventsFiltered} />
           </div>
-        </WidgetCard>
+        </Panel>
       </div>
 
-      {/* Tabla operativa (filtrada) */}
+      {/* 5) Operación */}
       <div className="col-span-12">
-        <WidgetCard title="Detalle operativo (filtrado)" subtitle="Abrí un conductor para ver su ficha">
-          <ScoreTable rows={filteredRows} seriesByUser={seriesByUserFiltered} lastRiskByUser={lastRiskByUser.current} />
-        </WidgetCard>
+        <Panel title="Detalle operativo (filtrado)" subtitle="Clic para abrir la ficha del conductor">
+          <ScoreTable
+            rows={filteredRows}
+            seriesByUser={seriesByUserFiltered}
+            lastRiskByUser={lastRiskByUser.current}
+          />
+        </Panel>
       </div>
     </div>
   </>

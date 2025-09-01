@@ -44,3 +44,4 @@ setInterval(() => {
 console.log(`Simulator ON → ${config.simulator.users} usuarios, cada ${config.simulator.emitMs}ms`);
 
 
+

@@ -2,9 +2,26 @@
 
 const claims: Claim[] = [];
 
-export function addClaim(c: Claim) {
-  claims.push(c);
+function genId() {
+  return (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)).toUpperCase();
+}
+
+export function addClaim(c: Omit<Claim, "id" | "ts"> & Partial<Pick<Claim, "ts">>): Claim {
+  const claim: Claim = {
+    id: genId(),
+    ts: c.ts ?? Date.now(),
+    userId: c.userId,
+    type: c.type ?? "incident",
+    severity: c.severity ?? 3,
+    amountUsd: c.amountUsd ?? 0,
+    status: c.status ?? "open",
+    lat: c.lat,
+    lng: c.lng,
+    description: c.description,
+  };
+  claims.push(claim);
   if (claims.length > 1000) claims.shift();
+  return claim;
 }
 
 export function getRecentClaims(days = 30): Claim[] {

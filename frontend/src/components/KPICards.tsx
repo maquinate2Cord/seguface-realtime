@@ -1,33 +1,22 @@
 ﻿"use client";
+import React from "react";
 
-interface KPICardsProps {
-  metrics: {
-    avgScore?: number;
-    riskEvents?: number;
-    activeVehicles?: number;
-    reductionPercent?: number;
-  };
-}
-
-function Card({ label, value }: { label: string; value: number | string | undefined }) {
-  return (
-    <div className="bg-slate-800 rounded-xl p-4 shadow-md">
-      <p className="text-gray-400 text-sm">{label}</p>
-      <h2 className="text-xl font-bold">{value ?? "-"}</h2>
+export default function KPICards({
+  total, active, avgScore, highRisk, criticalEvents
+}:{ total:number; active:number; avgScore:number; highRisk:number; criticalEvents:number }){
+  const Card = ({ label, value }:{ label:string; value:string|number }) => (
+    <div className="card p-4">
+      <div className="text-sm text-slate-400">{label}</div>
+      <div className="text-3xl font-bold">{value}</div>
     </div>
   );
-}
-
-export default function KPICards({ metrics }: KPICardsProps) {
   return (
-    <section className="grid grid-cols-2 md:grid-cols-4 gap-4">
-      <Card label="Vehículos Activos" value={metrics.activeVehicles} />
-      <Card label="Eventos de Riesgo" value={metrics.riskEvents} />
-      <Card
-        label="Score Promedio"
-        value={metrics.avgScore !== undefined ? metrics.avgScore.toFixed(1) : "-"}
-      />
-      <Card label="% Reducción" value={metrics.reductionPercent} />
+    <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+      <Card label="Conductores" value={total} />
+      <Card label="Activos (5m)" value={active} />
+      <Card label="Score promedio" value={(avgScore ?? 0).toFixed(1)} />
+      <Card label="Riesgo alto (<60)" value={highRisk} />
+      <Card label="Eventos críticos" value={criticalEvents} />
     </section>
   );
 }

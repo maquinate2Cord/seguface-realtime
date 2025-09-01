@@ -21,8 +21,11 @@ import { addRiskEvent } from "./events_store";
 import { computePercentiles, eventsHeatmap } from "./analytics2";
 import { qualityMetrics } from "./quality";
 import { pushAlert, getRecentAlerts, ackAlert } from "./alerts";
-
 import { liftByDecile, expectedLoss, claimsAging } from "./loss";
+
+import { computeDrift, snapshotBaseline } from "./drift";
+import { calibrationCurve, brierScore } from "./calibration";
+import { modelHealth, resetBaselineNow } from "./model_health";
 
 const app = express();
 const server = http.createServer(app);
@@ -119,22 +122,51 @@ app.post("/alerts/ack", (req, res) => {
   res.json({ ok: ackAlert(id) });
 });
 
-/** === Sprint 2: endpoints nuevos === */
+/** Sprint 2: riesgo/negocio */
 app.get("/portfolio/lift", (req, res) => {
   const days = Math.max(7, Math.min(365, Number(req.query.days ?? 90)));
   const bins = Math.max(3, Math.min(20, Number(req.query.bins ?? 10)));
   res.json({ items: liftByDecile(days, bins) });
 });
-
 app.get("/loss/expected", (req, res) => {
   const days = Math.max(7, Math.min(365, Number(req.query.days ?? 30)));
   const by = (String(req.query.by || "bucket") === "region") ? "region" : "bucket";
   res.json({ items: expectedLoss(by as any, days) });
 });
-
 app.get("/claims/aging", (req, res) => {
   const days = Math.max(7, Math.min(365, Number(req.query.days ?? 90)));
   res.json({ items: claimsAging(days) });
+});
+
+/** === Sprint 3: Modelo / MLOps === */
+app.post("/model/baseline/snapshot", (req, res) => {
+  const bins = Math.max(5, Math.min(50, Number(req.query.bins ?? 20)));
+  const values = getTop(5000).map(s=>s.score);
+  const b = snapshotBaseline(values, bins);
+  res.json({ baseline: b });
+});
+app.get("/model/drift", (req, res) => {
+  const bins = Math.max(5, Math.min(50, Number(req.query.bins ?? 20)));
+  const values = getTop(5000).map(s=>s.score);
+  const d = computeDrift(values, bins);
+  res.json(d);
+});
+app.get("/model/calibration", (req, res) => {
+  const days = Math.max(7, Math.min(365, Number(req.query.days ?? 90)));
+  const bins = Math.max(5, Math.min(30, Number(req.query.bins ?? 10)));
+  const beta = Math.max(0.01, Math.min(0.9, Number(req.query.beta ?? 0.25)));
+  res.json(calibrationCurve(days, bins, beta));
+});
+app.get("/model/brier", (req, res) => {
+  const days = Math.max(7, Math.min(365, Number(req.query.days ?? 90)));
+  const beta = Math.max(0.01, Math.min(0.9, Number(req.query.beta ?? 0.25)));
+  res.json(brierScore(days, beta));
+});
+app.get("/model/health", (req, res) => {
+  const bins = Math.max(5, Math.min(50, Number(req.query.bins ?? 20)));
+  const days = Math.max(7, Math.min(365, Number(req.query.days ?? 90)));
+  const beta = Math.max(0.01, Math.min(0.9, Number(req.query.beta ?? 0.25)));
+  res.json(modelHealth({ bins, days, beta }));
 });
 
 /** Socket bridge */

@@ -10,6 +10,7 @@ import TrendChart from "@/components/TrendChart";
 import RiskMap from "@/components/RiskMap";
 import MultiUserChart from "@/components/MultiUserChart";
 import ScoreTable from "@/components/ScoreTable";
+
 import PercentilesBands from "@/components/PercentilesBands";
 import EventsHeatmap from "@/components/EventsHeatmap";
 import QualityPanel from "@/components/QualityPanel";
@@ -17,6 +18,10 @@ import LiveAlerts from "@/components/LiveAlerts";
 import LiftDecilesChart from "@/components/LiftDecilesChart";
 import ExpectedLossPanel from "@/components/ExpectedLossPanel";
 import ClaimsAgingPanel from "@/components/ClaimsAgingPanel";
+
+import DriftPanel from "@/components/DriftPanel";
+import CalibrationChart from "@/components/CalibrationChart";
+import ModelHealthBadge from "@/components/ModelHealthBadge";
 
 const SimConfigPanel = dynamic(() => import("@/components/SimConfigPanel"), { ssr: false });
 
@@ -28,7 +33,7 @@ type RiskEvt = { userId: string; ts: number; type: "overSpeed" | "hardBrake" | "
 type PortfolioMetrics = { totalDrivers: number; activeVehicles: number; avgScore: number; highRisk: number; updatedAt: number };
 type Analytics = { buckets: { name: "High" | "Medium" | "Low"; count: number }[]; topRisk: { userId: string; score: number; lastTs: number; events: number }[] };
 
-type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim";
+type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim" | "model";
 
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
@@ -54,11 +59,17 @@ export default function DashboardPage() {
   const [lift, setLift] = useState<any[] | null>(null);
   const [eloss, setEloss] = useState<any[] | null>(null);
 
-  // Claims fetches
+  // Claims
   const [aging, setAging] = useState<any[] | null>(null);
 
   // Calidad
   const [quality, setQuality] = useState<any>(null);
+
+  // MODEL / MLOps
+  const [drift, setDrift] = useState<any>(null);
+  const [calib, setCalib] = useState<any>(null);
+  const [brier, setBrier] = useState<number | null>(null);
+  const [health, setHealth] = useState<any>(null);
 
   // Socket bootstrap
   useEffect(() => {
@@ -114,6 +125,12 @@ export default function DashboardPage() {
     if (tab === "claims") {
       fetch("http://localhost:4000/claims/aging?days=90").then(r=>r.json()).then(j=>setAging(j.items)).catch(()=>setAging(null));
     }
+    if (tab === "model") {
+      fetch("http://localhost:4000/model/drift?bins=20").then(r=>r.json()).then(setDrift).catch(()=>setDrift(null));
+      fetch("http://localhost:4000/model/calibration?days=90&bins=10&beta=0.25").then(r=>r.json()).then(setCalib).catch(()=>setCalib(null));
+      fetch("http://localhost:4000/model/brier?days=90&beta=0.25").then(r=>r.json()).then(j=>setBrier(j.brier)).catch(()=>setBrier(null));
+      fetch("http://localhost:4000/model/health?bins=20&days=90&beta=0.25").then(r=>r.json()).then(setHealth).catch(()=>setHealth(null));
+    }
   }, [tab]);
 
   // KPIs globales
@@ -146,18 +163,10 @@ export default function DashboardPage() {
   }, [seriesByUser, filteredUserIds]);
   const eventsFiltered = React.useMemo(()=> events.filter(e=>filteredUserIds.has(e.userId)), [events, filteredUserIds]);
 
-  // Calidad (refresh 5s)
-  useEffect(() => {
-    const load = () => fetch("http://localhost:4000/quality/metrics?minutes=60").then(r=>r.json()).then(j=>setQuality(j.quality)).catch(()=>setQuality(null));
-    load();
-    const t = setInterval(load, 5000);
-    return ()=>clearInterval(t);
-  }, []);
-
   // Export CSV (tabla filtrada)
   const exportCsv = () => {
-    const header = "userId,score,events,lastTs\\n";
-    const body = filteredRows.map(r => `${r.userId},${r.score.toFixed(2)},${r.events},${r.lastTs}`).join("\\n");
+    const header = "userId,score,events,lastTs\n";
+    const body = filteredRows.map(r => `${r.userId},${r.score.toFixed(2)},${r.events},${r.lastTs}`).join("\n");
     const blob = new Blob([header+body], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -165,16 +174,28 @@ export default function DashboardPage() {
     URL.revokeObjectURL(url);
   };
 
+  // Reset baseline drift
+  const resetBaseline = async () => {
+    await fetch("http://localhost:4000/model/baseline/snapshot?bins=20", { method: "POST" });
+    const d = await fetch("http://localhost:4000/model/drift?bins=20").then(r=>r.json());
+    setDrift(d);
+    const h = await fetch("http://localhost:4000/model/health?bins=20&days=90&beta=0.25").then(r=>r.json());
+    setHealth(h);
+  };
+
   return (
     <main className="min-h-screen p-6 md:p-10">
       <header className="mb-6 flex items-center justify-between sticky top-0 bg-white/70 backdrop-blur z-10 p-2 rounded-xl border border-slate-200">
         <h1 className="text-2xl md:text-3xl font-bold">Seguface Dashboard</h1>
-        <ConnectionBadge status={status} />
+        <div className="flex items-center gap-3">
+          {health ? <ModelHealthBadge status={health.status} psi={health.psi} ks={health.ks} brier={health.brier} /> : null}
+          <ConnectionBadge status={status} />
+        </div>
       </header>
 
       {/* Tabs */}
       <nav className="mb-6 flex gap-2">
-        {(["realtime","portfolio","claims","drivers","sim"] as Tab[]).map((key) => (
+        {(["realtime","portfolio","claims","drivers","sim","model"] as Tab[]).map((key) => (
           <button key={key} onClick={() => setTab(key)}
             className={`px-3 py-2 rounded-xl border ${tab===key ? "bg-slate-800 text-white border-slate-700" : "bg-slate-100 text-slate-700 border-slate-300"}`}>
             {key.toUpperCase()}
@@ -272,7 +293,7 @@ export default function DashboardPage() {
         </section>
       )}
 
-      {/* DRIVERS (placeholder) */}
+      {/* DRIVERS */}
       {tab === "drivers" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
           <div className="text-sm text-slate-500">Usá Realtime para buscar/filtrar y abrir el detalle desde la tabla.</div>
@@ -283,6 +304,27 @@ export default function DashboardPage() {
       {tab === "sim" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
           <SimConfigPanel />
+        </section>
+      )}
+
+      {/* MODEL */}
+      {tab === "model" && (
+        <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-3">
+            {drift
+              ? <DriftPanel psi={drift.psi} ks={drift.ks} bins={drift.current.bins} base={drift.baseline.probs} cur={drift.current.probs} onReset={resetBaseline} />
+              : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando drift…</div>}
+          </div>
+          <div className="lg:col-span-2">
+            {calib
+              ? <CalibrationChart items={calib.items} mae={calib.mae} brier={typeof brier==="number"?brier:undefined} />
+              : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando calibración…</div>}
+          </div>
+          <div>
+            {health
+              ? <ModelHealthBadge status={health.status} psi={health.psi} ks={health.ks} brier={health.brier} />
+              : <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-500 text-sm">Cargando health…</div>}
+          </div>
         </section>
       )}
     </main>

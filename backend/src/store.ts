@@ -2,6 +2,11 @@
 
 const states = new Map<string, ScoreState>();
 
+export function getState(userId: string) {
+  return states.get(userId);
+}
+
+
 export function upsertScore(userId: string, scoreDelta: number, t: Telemetry) {
   const prev: ScoreState = states.get(userId) ?? { userId, score: 85, lastTs: 0, events: 0, last: null };
   const nextScore = clamp(prev.score + scoreDelta, 0, 100);
@@ -28,6 +33,7 @@ export function toLean(s: ScoreState) {
 function clamp(x: number, lo: number, hi: number) {
   return Math.min(hi, Math.max(lo, x));
 }
+
 
 
 

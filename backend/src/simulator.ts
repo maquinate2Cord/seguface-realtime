@@ -1,5 +1,5 @@
 ﻿import { setInterval } from "node:timers";
-import { upsertScore } from "./store";
+import { upsertScore, getState } from "./store";
 import { scoreDelta, detectRisk } from "./scoring";
 import type { Telemetry } from "./types";
 import { config } from "./config";
@@ -13,7 +13,7 @@ const jitter = (base: number, maxDelta = 0.03) => base + (Math.random() - 0.5) *
 
 setInterval(() => {
   const now = Date.now();
-  const batch = Math.max(1, Math.round(users.length * 0.15)); // ~15% usuarios por tick
+  const batch = Math.max(1, Math.round(users.length * 0.15)); // ~15% por tick
 
   for (let i = 0; i < batch; i++) {
     const userId = users[Math.floor(Math.random() * users.length)];
@@ -30,18 +30,15 @@ setInterval(() => {
       lng: jitter(CENTER_LNG),
     };
 
-    const state = upsertScore(userId, scoreDelta(t), t);
+    const prev = getState(userId);
+    const delta = scoreDelta(prev?.score ?? 85, t);
+    const state = upsertScore(userId, delta, t);
     const lean = { userId: state.userId, score: state.score, lastTs: state.lastTs, events: state.events };
     bus.emit("score", lean);
 
     const risks = detectRisk(t);
-    for (const r of risks) {
-      bus.emit("risk", r);
-    }
+    for (const r of risks) bus.emit("risk", r);
   }
 }, config.simulator.emitMs);
 
 console.log(`Simulator ON → ${config.simulator.users} usuarios, cada ${config.simulator.emitMs}ms`);
-
-
-

@@ -11,18 +11,11 @@ import RiskMap from "../../components/RiskMap";
 import MultiUserChart from "../../components/MultiUserChart";
 import ScoreTable from "../../components/ScoreTable";
 
-// Pro panels (cargados dinámicamente, con fallback seguro)
-const Safe = (msg: string) => () => <div className="text-sm text-slate-400">{msg}</div>;
-const PortfolioCards = dynamic(() => import("../../components/PortfolioCards").then(m => m.default).catch(() => Promise.resolve(Safe("PortfolioCards no disponible"))), { ssr: false });
-const ClaimsPanel    = dynamic(() => import("../../components/ClaimsPanel").then(m => m.default).catch(() => Promise.resolve(Safe("ClaimsPanel no disponible"))), { ssr: false });
-const RiskBucketsChart = dynamic(() => import("../../components/RiskBucketsChart").then(m => m.default).catch(() => Promise.resolve(Safe("RiskBucketsChart no disponible"))), { ssr: false });
-const TopRiskTable   = dynamic(() => import("../../components/TopRiskTable").then(m => m.default).catch(() => Promise.resolve(Safe("TopRiskTable no disponible"))), { ssr: false });
-const ReasonCodesPanel = dynamic(() => import("../../components/ReasonCodesPanel").then(m => m.default).catch(() => Promise.resolve(Safe("ReasonCodesPanel no disponible"))), { ssr: false });
-const DriftPanel     = dynamic(() => import("../../components/DriftPanel").then(m => m.default).catch(() => Promise.resolve(Safe("DriftPanel no disponible"))), { ssr: false });
-const CalibrationChart = dynamic(() => import("../../components/CalibrationChart").then(m => m.default).catch(() => Promise.resolve(Safe("CalibrationChart no disponible"))), { ssr: false });
+const SimConfigPanel = dynamic(() => import("../../components/SimConfigPanel"), {
+  ssr: false,
+  loading: () => <div className="text-sm text-slate-500">Cargando SimConfig…</div>
+});
 
-
-const SimConfigPanel = dynamic(() => import("../../components/SimConfigPanel").then(m => m.default).catch(() => Promise.resolve(Safe("SimConfigPanel no disponible"))), { ssr: false });
 type Status = "connected" | "connecting" | "disconnected";
 type Row = { userId: string; score: number; lastTs: number; events: number };
 type Point = { ts: number; avg: number };
@@ -32,6 +25,8 @@ type PortfolioMetrics = { totalDrivers: number; activeVehicles: number; avgScore
 type Analytics = { buckets: { name: "High" | "Medium" | "Low"; count: number }[], topRisk: { userId: string; score: number; lastTs: number; events: number }[] };
 type Claim = { id: string; userId: string; ts: number; type?: string; severity?: number; amountUsd?: number; status?: string; lat?: number; lng?: number; description?: string };
 
+type Tab = "realtime" | "portfolio" | "claims" | "drivers" | "sim";
+
 export default function DashboardPage() {
   const [status, setStatus] = useState<Status>("connecting");
   const [rows, setRows] = useState<Row[]>([]);
@@ -40,9 +35,8 @@ export default function DashboardPage() {
   const [seriesByUser, setSeriesByUser] = useState<Record<string, { ts: number; score: number }[]>>({});
   const lastRiskByUser = useRef<Record<string, RiskEvt | undefined>>({});
   const buffer = useRef<number[]>([]);
-  const limit = 8;
+  const [tab, setTab] = useState<Tab>("realtime");
 
-  const [tab, setTab] = useState<"realtime"|"portfolio"|"claims"|"drivers">("realtime");
   const [portfolio, setPortfolio] = useState<PortfolioMetrics | null>(null);
   const [analytics, setAnalytics] = useState<Analytics | null>(null);
   const [claims, setClaims] = useState<Claim[] | null>(null);
@@ -87,7 +81,6 @@ export default function DashboardPage() {
     return () => { clearInterval(id); socket.close(); };
   }, []);
 
-  // Fetch por tab
   useEffect(() => {
     if (tab === "portfolio") {
       fetch("http://localhost:4000/metrics").then(r => r.json()).then(j => setPortfolio(j.metrics)).catch(() => setPortfolio(null));
@@ -114,18 +107,13 @@ export default function DashboardPage() {
 
       {/* Tabs */}
       <nav className="mb-6 flex gap-2">
-        {[
-          ["realtime","Realtime"],
-          ["portfolio","Portfolio"],
-          ["claims","Claims"],
-          ["drivers","Drivers"],
-        ].map(([key,label]) => (
+        {(["realtime","portfolio","claims","drivers","sim"] as Tab[]).map((key) => (
           <button
             key={key}
-            onClick={() => setTab(key as any)}
+            onClick={() => setTab(key)}
             className={`px-3 py-2 rounded-xl border ${tab===key ? "bg-slate-800 text-white border-slate-700" : "bg-slate-100 text-slate-700 border-slate-300"}`}
           >
-            {label}
+            {key.toUpperCase()}
           </button>
         ))}
       </nav>
@@ -163,20 +151,10 @@ export default function DashboardPage() {
           </div>
 
           <div className="lg:col-span-2 p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-            {analytics ? <RiskBucketsChart {...(analytics as any)} /> : <div className="text-sm text-slate-500">Cargando buckets…</div>}
+            {analytics ? <div><strong>Risk Buckets</strong><pre className="text-xs mt-2">{JSON.stringify(analytics.buckets, null, 2)}</pre></div> : <div className="text-sm text-slate-500">Cargando buckets…</div>}
           </div>
           <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-            {analytics ? <TopRiskTable {...(analytics as any)} /> : <div className="text-sm text-slate-500">Cargando top risk…</div>}
-          </div>
-
-          <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-            <ReasonCodesPanel {...(analytics as any)} />
-          </div>
-          <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-            <DriftPanel {...(analytics as any)} />
-          </div>
-          <div className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-            <CalibrationChart {...(analytics as any)} />
+            {analytics ? <div><strong>Top Risk</strong><pre className="text-xs mt-2">{JSON.stringify(analytics.topRisk, null, 2)}</pre></div> : <div className="text-sm text-slate-500">Cargando top risk…</div>}
           </div>
         </section>
       )}
@@ -184,7 +162,7 @@ export default function DashboardPage() {
       {/* Claims */}
       {tab === "claims" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
-          {claims ? <ClaimsPanel claims={claims as any} /> : <div className="text-sm text-slate-500">Cargando claims…</div>}
+          {claims ? <div><strong>Claims</strong><pre className="text-xs mt-2">{JSON.stringify(claims, null, 2)}</pre></div> : <div className="text-sm text-slate-500">Cargando claims…</div>}
         </section>
       )}
 
@@ -195,10 +173,14 @@ export default function DashboardPage() {
             Explorar detalle por conductor en <code>/dashboard/driver/[id]</code>. Agregá enlaces desde ScoreTable si querés deep-link.
           </div>
         </section>
-      )}      {/* Sim */}
+      )}
+
+      {/* Sim */}
       {tab === "sim" && (
         <section className="p-4 rounded-xl border border-slate-200 bg-white text-slate-800">
           <SimConfigPanel />
         </section>
       )}
-  
+    </main>
+  );
+}

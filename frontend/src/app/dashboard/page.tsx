@@ -1,11 +1,11 @@
 ﻿"use client";
 
 import { useEffect, useState } from "react";
-import KPICards from "@/components/KPICards";
-import RiskMap from "@/components/RiskMap";
-import HistogramScores from "@/components/HistogramScores";
-import TrendChart from "@/components/TrendChart";
-import ScoreTable from "@/components/ScoreTable";
+import KPICards from "../../components/KPICards";
+import RiskMap from "../../components/RiskMap";
+import HistogramScores from "../../components/HistogramScores";
+import TrendChart from "../../components/TrendChart";
+import ScoreTable from "../../components/ScoreTable";
 
 export default function DashboardPage() {
   const [data, setData] = useState<any>(null);

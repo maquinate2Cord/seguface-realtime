@@ -1,75 +1,41 @@
 ﻿import express from "express";
 import http from "http";
 import cors from "cors";
+import helmet from "helmet";
+import morgan from "morgan";
 import { Server } from "socket.io";
+import { StatusCodes } from "http-status-codes";
 import { config } from "./config.js";
+import { getTop, toLean, incEvents } from "./store.js";
+import type { LeanState } from "./types.js";
 import { bus } from "./bus.js";
-import { getAllScores } from "./store.js";
-import { computeMetrics } from "./scoring.js";
 
 const app = express();
-app.use(cors({ origin: config.corsOrigin || "*" }));
-app.use(express.json());
-
-// Healthcheck
-app.get("/health", (_req, res) => res.json({ ok: true, ts: Date.now() }));
-
-// Scores crudos
-app.get("/scores", (_req, res) => res.json({ items: getAllScores() }));
-
-// Métricas calculadas
-app.get("/metrics", (_req, res) => {
-  const m = computeMetrics(getAllScores());
-  res.json({ metrics: m });
-});
-
-// Dashboard data (para Fase 4)
-app.get("/dashboard", (_req, res) => {
-  const scores = getAllScores();
-  const metrics = computeMetrics(scores);
-
-  // Dataset ejemplo: siniestros por mes (mock temporal)
-  const trend = [
-    { name: "Enero", siniestros: 12 },
-    { name: "Febrero", siniestros: 9 },
-    { name: "Marzo", siniestros: 15 },
-  ];
-
-  // Distribución de scores
-  const distribution = [
-    { name: "Baja", value: scores.filter(s => s.value < 30).length },
-    { name: "Media", value: scores.filter(s => s.value >= 30 && s.value < 70).length },
-    { name: "Alta", value: scores.filter(s => s.value >= 70).length },
-  ];
-
-  res.json({
-    metrics,
-    trend,
-    distribution,
-    scores, // tabla completa
-  });
-});
-
-// Socket.IO para eventos en tiempo real
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: { origin: config.corsOrigin || "*" },
-});
+const io = new Server(server, { cors: { origin: config.corsOrigin } });
+
+app.use(helmet());
+app.use(cors({ origin: config.corsOrigin }));
+app.use(express.json());
+app.use(morgan("dev"));
+
+app.get("/health", (_req, res) => res.status(StatusCodes.OK).json({ ok: true, ts: Date.now() }));
+app.get("/scores", (_req, res) => res.json({ items: getTop(200).map(toLean) }));
 
 io.on("connection", (socket) => {
-  console.log("Cliente conectado:", socket.id);
-
-  // Reenviar eventos del bus al cliente
-  bus.on("riskEvent", (event) => {
-    socket.emit("riskEvent", event);
-  });
-
-  socket.on("disconnect", () => {
-    console.log("Cliente desconectado:", socket.id);
-  });
+  socket.emit("bootstrap", { items: getTop(200).map(toLean) });
 });
 
-const PORT = config.port || 4000;
-server.listen(PORT, () => {
-  console.log(`Seguface backend escuchando en http://localhost:${PORT}`);
+// Reenvío del simulador (vía bus) a los clientes Socket.IO
+bus.on("score", (lean: LeanState) => {
+  io.emit("score:update", { type: "score:update", state: lean });
+});
+bus.on("risk", (evt: { userId: string; ts: number; type: string; lat: number; lng: number; severity: number }) => {
+  incEvents(evt.userId); // reflejar eventos en tabla
+  io.emit("risk:event", { event: evt });
+});
+
+server.listen(config.port, () => {
+  console.log(`Seguface backend running on http://localhost:${config.port}`);
+  if (config.simulator.enabled) import("./simulator.js");
 });

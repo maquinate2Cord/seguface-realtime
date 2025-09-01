@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body { height: 100%; }
+body { background: #070b14; color: #e5e7eb; }
+
+.bg-grid {
+  background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.08) 1px, transparent 0);
+  background-size: 24px 24px;
+  mask-image: radial-gradient(ellipse at 50% 0%, rgba(0,0,0,0.7), rgba(0,0,0,1) 60%);
+  animation: drift 18s linear infinite;
+}
+@keyframes drift { from { background-position: 0 0; } to { background-position: 240px 0; } }
+
+.card { border-radius: 1rem; background: rgba(15, 23, 42, .6); backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 10px 30px rgba(0,0,0,.3); }

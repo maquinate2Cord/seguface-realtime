@@ -1,0 +1,2 @@
+import type { Config } from 'tailwindcss';
+export default { content:['./src/**/*.{js,ts,jsx,tsx}'], theme:{ extend:{ colors:{ seguface:{ primary:'#0ea5e9', dark:'#0b1220' }}}}, plugins:[], } satisfies Config;

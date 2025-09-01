@@ -9,13 +9,13 @@ import { z } from "zod";
 
 import { config } from "./config";
 import { getTop, toLean, incEvents } from "./store";
-import { getSimConfig, updateSimConfig, resetSimConfig } from "./scoring";
 import type { LeanState } from "./types";
 import { bus } from "./bus";
 
 import { computePortfolioMetrics } from "./metrics";
 import { portfolioAnalytics } from "./analytics";
 import { addClaim, getAllClaims, getRecentClaims } from "./claims";
+import { getSimConfig, updateSimConfig, resetSimConfig } from "./scoring";
 
 const app = express();
 const server = http.createServer(app);
@@ -26,22 +26,23 @@ app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json({ limit: "1mb" }));
 app.use(morgan("dev"));
 
+/** Health & Scores */
 app.get("/health", (_req, res) => res.status(StatusCodes.OK).json({ ok: true, ts: Date.now() }));
 app.get("/scores", (_req, res) => res.json({ items: getTop(500).map(toLean) }));
 
-// === Metrics (portfolio)
+/** Portfolio Metrics */
 app.get("/metrics", (_req, res) => {
   const scores = getTop(500);
-  return res.json({ metrics: computePortfolioMetrics(scores) });
+  res.json({ metrics: computePortfolioMetrics(scores) });
 });
 
-// === Analytics (buckets + top risk)
+/** Analytics */
 app.get("/analytics", (_req, res) => {
   const scores = getTop(500);
-  return res.json({ analytics: portfolioAnalytics(scores) });
+  res.json({ analytics: portfolioAnalytics(scores) });
 });
 
-// === Claims
+/** Claims */
 const claimSchema = z.object({
   userId: z.string(),
   ts: z.number().optional(),
@@ -56,26 +57,18 @@ const claimSchema = z.object({
 
 app.get("/claims", (req, res) => {
   const days = Number(req.query.days ?? 30);
-  if (!Number.isFinite(days) || days <= 0) {
-    return res.json({ items: getAllClaims() });
-  }
+  if (!Number.isFinite(days) || days <= 0) return res.json({ items: getAllClaims() });
   return res.json({ items: getRecentClaims(days) });
 });
 
 app.post("/claims", (req, res) => {
   const parsed = claimSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(StatusCodes.BAD_REQUEST).json({ error: parsed.error.flatten() });
-  }
+  if (!parsed.success) return res.status(StatusCodes.BAD_REQUEST).json({ error: parsed.error.flatten() });
   const saved = addClaim(parsed.data);
   return res.status(StatusCodes.CREATED).json({ item: saved });
 });
 
-// === Socket.IO bootstrap + streams
-io.on("connection", (socket) => {
-  socket.emit("bootstrap", { items: getTop(200).map(toLean) });
-
-// === Sim Config (runtime tuning)
+/** Sim Config (runtime tuning) */
 const simPatchSchema = z.object({
   targetScore: z.number().min(0).max(100).optional(),
   kPull: z.number().min(0).max(1).optional(),
@@ -87,31 +80,16 @@ const simPatchSchema = z.object({
     overSpeed: z.number().min(0).max(1).optional(),
     hardBrake: z.number().min(0).max(1).optional(),
     hardAccel: z.number().min(0).max(1).optional(),
-  }).partial().optional()
+  }).partial().optional(),
 }).partial();
 
-app.get("/sim-config", (_req, res) => res.json({ config: getSimConfig() }));
+app.get("/sim-config", (_req, res) => {
+  res.json({ config: getSimConfig() });
+});
 
 app.patch("/sim-config", (req, res) => {
-  const simPatchSchema = (require("zod") as typeof import("zod")).z.object({
-    targetScore: (require("zod") as typeof import("zod")).z.number().min(0).max(100).optional(),
-    kPull: (require("zod") as typeof import("zod")).z.number().min(0).max(1).optional(),
-    noiseStd: (require("zod") as typeof import("zod")).z.number().min(0).max(5).optional(),
-    maxDeltaUp: (require("zod") as typeof import("zod")).z.number().min(0).max(10).optional(),
-    maxDeltaDown: (require("zod") as typeof import("zod")).z.number().min(-10).max(0).optional(),
-    coolDownMs: (require("zod") as typeof import("zod")).z.number().int().min(0).max(600000).optional(),
-    prob: (require("zod") as typeof import("zod")).z.object({
-      overSpeed: (require("zod") as typeof import("zod")).z.number().min(0).max(1).optional(),
-      hardBrake: (require("zod") as typeof import("zod")).z.number().min(0).max(1).optional(),
-      hardAccel: (require("zod") as typeof import("zod")).z.number().min(0).max(1).optional(),
-    }).partial().optional()
-  }).partial();
-
   const parsed = simPatchSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
-  const cfg = updateSimConfig(parsed.data as any); // prob parcial permitido
-  return res.json({ config: cfg });
-});
+  if (!parsed.success) return res.status(StatusCodes.BAD_REQUEST).json({ error: parsed.error.flatten() });
   const cfg = updateSimConfig(parsed.data);
   return res.json({ config: cfg });
 });
@@ -121,6 +99,9 @@ app.post("/sim-config/reset", (_req, res) => {
   return res.json({ config: cfg });
 });
 
+/** Socket.IO bootstrap + streams */
+io.on("connection", (socket) => {
+  socket.emit("bootstrap", { items: getTop(200).map(toLean) });
 });
 
 // bridge bus → io
@@ -136,6 +117,3 @@ server.listen(config.port, () => {
   console.log(`Seguface backend running on http://localhost:${config.port}`);
   if (config.simulator.enabled) import("./simulator");
 });
-
-
-
